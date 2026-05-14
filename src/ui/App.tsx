@@ -168,10 +168,9 @@ export function SqlPlaygroundImportApp({
   const [appliedQuestion, setAppliedQuestion] = useState<QuestionModel | null>(
     initialQuestion,
   );
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(
-    readOnlyImport ? "query" : "setup",
-  );
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("setup");
   const [isSchemaEditing, setIsSchemaEditing] = useState(false);
+  const [isQuerySchemaVisible, setIsQuerySchemaVisible] = useState(true);
   const [validationErrors, setValidationErrors] = useState<ValidationErrorMap>({});
   const [pendingDraftKeys, setPendingDraftKeys] = useState<PendingDraftMap>({});
 
@@ -370,14 +369,33 @@ export function SqlPlaygroundImportApp({
           )}
 
           {appliedQuestion ? (
-            <SqlPlaygroundApp
-              question={appliedQuestion}
-              initialQuery={readOnlyImport ? "" : initialQuery}
-              solutionQuery={readOnlyImport ? initialQuery : undefined}
-              createRunner={createRunner}
-              title="Workbench"
-              runDisabled={hasBlockingDraftState}
-            />
+            <div
+              className={`query-context-layout${isQuerySchemaVisible ? "" : " query-context-layout-collapsed"}`}
+            >
+              {isQuerySchemaVisible ? (
+                <QuerySchemaReference
+                  question={appliedQuestion}
+                  onCollapse={() => setIsQuerySchemaVisible(false)}
+                />
+              ) : (
+                <div className="query-schema-restore">
+                  <button
+                    className="ghost-action"
+                    onClick={() => setIsQuerySchemaVisible(true)}
+                  >
+                    Show schema reference
+                  </button>
+                </div>
+              )}
+              <SqlPlaygroundApp
+                question={appliedQuestion}
+                initialQuery={readOnlyImport ? "" : initialQuery}
+                solutionQuery={readOnlyImport ? initialQuery : undefined}
+                createRunner={createRunner}
+                title="Workbench"
+                runDisabled={hasBlockingDraftState}
+              />
+            </div>
           ) : (
             <div className="empty-workbench">
               <p>Import a prompt or choose a seeded exercise to initialize DuckDB.</p>
@@ -442,6 +460,55 @@ function PracticePromptCard({ exercise }: { exercise: ExerciseDefinition }) {
       <h3>{exercise.title}</h3>
       <p className="prompt-summary">{exercise.summary}</p>
     </section>
+  );
+}
+
+function QuerySchemaReference({
+  question,
+  onCollapse,
+}: {
+  question: QuestionModel;
+  onCollapse: () => void;
+}) {
+  const joinHintsByTable = inferJoinHintsByTable(question);
+
+  return (
+    <aside className="query-schema-rail" aria-label="Schema reference">
+      <div className="query-schema-rail-header">
+        <div>
+          <div className="dataset-status-kicker">While you query</div>
+          <h3>Schema reference</h3>
+        </div>
+        <button className="ghost-action" onClick={onCollapse}>
+          Hide schema reference
+        </button>
+      </div>
+      <div className="query-schema-table-list">
+        {question.tables.map((table, tableIndex) => (
+          <article key={`${table.name}-${tableIndex}`} className="query-schema-table-card">
+            <div className="table-heading-row">
+              <strong>{table.name}</strong>
+              {table.sampleRowsMode === "generated" && (
+                <span className="generated-row-chip">Generated sample data</span>
+              )}
+            </div>
+            {joinHintsByTable[tableIndex]?.length > 0 && (
+              <div className="table-join-hint">
+                joins on: {joinHintsByTable[tableIndex].join(", ")}
+              </div>
+            )}
+            <ul className="query-schema-column-list">
+              {table.columns.map((column) => (
+                <li key={`${table.name}-${column.name}`}>
+                  <span>{column.name}</span>
+                  <span className="query-schema-column-type">{column.type}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+    </aside>
   );
 }
 

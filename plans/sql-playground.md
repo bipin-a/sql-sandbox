@@ -353,3 +353,89 @@ This phase should make the default seeded experience quieter and more practice-o
 - Replacing Setup/Query mode with a single unified layout
 - AI hints, tutoring, or grading
 - Persistence or progress tracking
+
+## Phase 9: Query-context workspace
+
+**User stories**: PRD 1, 2, 3, 4, 8, 11, 12, 17, 20, 22
+
+**Status**: complete
+
+### What to build
+
+Keep Query as the main workspace, but stop making it feel blind. Users should be able to see the relevant schema context while writing SQL, without bouncing back and forth between Setup and Query.
+
+This phase should improve orientation and reference access rather than add new SQL features:
+
+- **Query-side schema rail**: add a compact schema sidebar or reference panel inside Query mode that shows table names, columns, types, and join hints.
+- **Orientation-first seeded flow**: stop defaulting seeded exercises into isolated querying with no context. Seeded cases should either open in Setup first or show equivalent schema context immediately in Query.
+- **Compact reference behavior**: schema context should be collapsible or visually secondary so the editor still owns the main canvas.
+- **Mode split reassessment**: evaluate whether Setup/Query should remain separate modes once Query includes enough reference context.
+
+### TDD sequence
+
+1. [x] RED: users in Query mode cannot see table structure or join hints without leaving the editor.
+2. [x] GREEN: render a compact schema rail in Query mode with tables, columns, and join hints.
+3. [x] RED: seeded exercises still default to an orientation-poor view on first open.
+4. [x] GREEN: change the seeded default so users see schema context before or alongside the first query interaction.
+5. [x] RED: schema context overwhelms the editor or becomes a second full workspace.
+6. [x] GREEN: make the reference panel compact/collapsible and preserve editor dominance.
+7. [x] RED: the Setup/Query split is no longer clearly justified once Query has schema context.
+8. [x] GREEN: keep the split for now because Setup still owns import/recovery, and codify the setup-first seeded flow plus query-side schema rail in tests.
+
+### Acceptance criteria
+
+- [x] Query mode shows schema context without forcing users back to Setup.
+- [x] Seeded exercises no longer open into a blind editor.
+- [x] The SQL editor remains the primary focus of the workspace.
+- [x] Schema context is compact, readable, and does not feel like a second competing tool surface.
+- [x] The resulting Setup/Query behavior is simpler or more justified than the current split.
+
+### Out Of Scope For Phase 9
+
+- AI hints or tutoring
+- New generator controls or richer mock-data realism
+- Persistence or progress tracking
+
+## Phase 10: Dialect-aware practice
+
+**User stories**: PRD 1, 2, 3, 4, 8, 10, 11, 17, 20, 22
+
+**Status**: planned
+
+### What to build
+
+Keep the runtime simple, but stop pretending SQL flavor differences do not matter.
+
+This phase should make dialect an explicit part of practice without turning the app into a true multi-engine product:
+
+- **Dialect metadata**: add a dialect profile to seeded exercises and imported prompts, such as `Postgres`, `Snowflake`, `BigQuery`, or `Generic SQL`.
+- **Visible dialect chip**: show the active dialect near the problem brief and query workspace so users know what syntax expectations apply.
+- **Custom-import dialect choice**: let users choose a dialect when importing their own schema/problem so the app can frame the exercise correctly.
+- **Dialect-aware guidance**: surface quiet hints or warnings when the current dialect and the underlying runtime are likely to diverge on common syntax.
+- **Runtime simplicity**: keep DuckDB as the execution engine for now; do not introduce multiple SQL backends in this phase.
+
+### TDD sequence
+
+1. [ ] RED: seeded exercises do not communicate which SQL dialect they represent.
+2. [ ] GREEN: add dialect metadata to the exercise model and render it in the UI.
+3. [ ] RED: custom imports implicitly behave like generic SQL with no user control.
+4. [ ] GREEN: add import-time dialect selection and carry it through the session state.
+5. [ ] RED: users can write dialect-specific syntax with no guidance when DuckDB is likely to disagree.
+6. [ ] GREEN: surface narrow dialect-aware hints/warnings for the most common mismatches.
+7. [ ] RED: dialect support is drifting toward a backend explosion rather than a practice aid.
+8. [ ] GREEN: codify single-runtime behavior in tests and docs.
+
+### Acceptance criteria
+
+- [ ] Every seeded exercise exposes a visible dialect label.
+- [ ] Custom imports let the user pick a dialect without requiring engine setup.
+- [ ] The workspace can warn about common dialect/runtime mismatches without blocking query execution.
+- [ ] The app remains DuckDB-backed in this phase.
+- [ ] Dialect support improves learning context without turning the product into a configurable SQL IDE.
+
+### Out Of Scope For Phase 10
+
+- True multi-engine execution
+- Query transpilation across dialects
+- Full SQL linting or parser-level dialect validation
+- AI tutoring or auto-rewriting syntax

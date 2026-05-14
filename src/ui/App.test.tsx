@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { useEffect, useRef } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { QuestionModel } from "../lib/questionModel";
@@ -221,11 +221,14 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await screen.findByRole("heading", { name: "Imported tables" });
-    await screen.findByText("orders");
-    await screen.findByText("trips");
-    await screen.findByText("order_id");
-    await screen.findByText("actual_delivery_timestamp");
+    const importedTablesHeading = await screen.findByRole("heading", { name: "Imported tables" });
+    const previewPanel = importedTablesHeading.closest("section");
+
+    expect(previewPanel).toBeTruthy();
+    expect(within(previewPanel as HTMLElement).getByText("orders")).toBeTruthy();
+    expect(within(previewPanel as HTMLElement).getByText("trips")).toBeTruthy();
+    expect(within(previewPanel as HTMLElement).getByText("order_id")).toBeTruthy();
+    expect(within(previewPanel as HTMLElement).getByText("actual_delivery_timestamp")).toBeTruthy();
     expect(screen.queryByLabelText("Table 1 name")).toBeNull();
   });
 
@@ -242,8 +245,13 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await screen.findByText("Imported tables");
-    expect(screen.getAllByText("joins on: customer_id")).toHaveLength(2);
+    const importedTablesHeading = await screen.findByText("Imported tables");
+    const previewPanel = importedTablesHeading.closest("section");
+
+    expect(previewPanel).toBeTruthy();
+    expect(within(previewPanel as HTMLElement).getAllByText("joins on: customer_id")).toHaveLength(
+      2,
+    );
   });
 
   it("shows a parser warning for row width mismatch after import", async () => {
@@ -294,6 +302,9 @@ describe("SqlPlaygroundApp", () => {
       />,
     );
 
+    await screen.findByText("Ada");
+    await userEvent.click(screen.getByRole("button", { name: "Query" }));
+
     const editor = (await screen.findByLabelText("SQL query")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
     expect(screen.getAllByText("Seeded exercise with curated prompt rows.").length).toBeGreaterThan(
@@ -312,6 +323,9 @@ describe("SqlPlaygroundApp", () => {
         createRunner={vi.fn(async () => runner)}
       />,
     );
+
+    await screen.findByText("Ada");
+    await userEvent.click(screen.getByRole("button", { name: "Query" }));
 
     const editor = (await screen.findByLabelText("SQL query")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
@@ -718,7 +732,7 @@ describe("SqlPlaygroundApp", () => {
     expect(((await screen.findByLabelText("SQL query")) as HTMLTextAreaElement).value).toBe("");
   });
 
-  it("defaults seeded exercises to Query mode and preserves curated sample rows", async () => {
+  it("defaults seeded exercises to Setup mode and preserves curated sample rows", async () => {
     const runner = makeRunner(async () => ({ columns: ["total"], rows: [[2]] }));
 
     render(
@@ -729,20 +743,60 @@ describe("SqlPlaygroundApp", () => {
       />,
     );
 
-    await screen.findByLabelText("SQL query");
-    expect(screen.getByRole("button", { name: "Query" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "Setup" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Setup" }));
-
     await screen.findByText("Ada");
     await screen.findByText("Linus");
+    expect(screen.getByRole("button", { name: "Setup" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Query" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     expect(screen.queryByText("Generated sample data")).toBeNull();
     expect(screen.queryByLabelText("Table 1 name")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit schema" })).toBeNull();
+  });
+
+  it("shows seeded schema context in Query mode without leaving the editor", async () => {
+    const runner = makeRunner(async () => ({ columns: ["total"], rows: [[2]] }));
+
+    render(
+      <SqlPracticeStudio
+        exercises={[curatedSeedExercise]}
+        initialExerciseId="curated-seed"
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    await screen.findByText("Ada");
+    await userEvent.click(screen.getByRole("button", { name: "Query" }));
+    await screen.findByLabelText("SQL query");
+
+    const schemaReference = screen.getByLabelText("Schema reference");
+
+    expect(within(schemaReference).getByRole("heading", { name: "Schema reference" })).toBeTruthy();
+    expect(within(schemaReference).getByText("customers")).toBeTruthy();
+    expect(within(schemaReference).getByText("customer_name")).toBeTruthy();
+  });
+
+  it("lets query mode collapse schema reference without hiding the editor", async () => {
+    const runner = makeRunner(async () => ({ columns: ["total"], rows: [[2]] }));
+
+    render(
+      <SqlPracticeStudio
+        exercises={[curatedSeedExercise]}
+        initialExerciseId="curated-seed"
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    await screen.findByText("Ada");
+    await userEvent.click(screen.getByRole("button", { name: "Query" }));
+    await screen.findByLabelText("SQL query");
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide schema reference" }));
+
+    expect(screen.queryByLabelText("Schema reference")).toBeNull();
+    expect(screen.getByLabelText("SQL query")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show schema reference" })).toBeTruthy();
   });
 });

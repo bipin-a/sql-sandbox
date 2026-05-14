@@ -8,3 +8,5 @@ test-results/
 .claude/
 output/
 tsconfig.tsbuildinfo
+.vercel
+.env*.local

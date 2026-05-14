@@ -52,6 +52,10 @@ The same rule applies to typed editing: invalid values should be recoverable inl
 
 Users should work against a real SQL engine with as little setup friction as possible. DuckDB-Wasm is the implementation choice because it supports that goal without introducing backend complexity.
 
+### Dialect Matters, Runtime Stays Simple
+
+SQL flavor differences are part of the learning experience, especially for interview prep. The product should make dialect visible and teach users where syntax expectations come from, but it should stay runtime-simple until true multi-engine execution clearly earns its cost.
+
 ### Generated Data Is A Fallback
 
 Users should not have to manually enter row data just to make a schema runnable.
@@ -68,7 +72,9 @@ Query is for writing SQL and reading results. In Query mode, the workbench shoul
 
 For seeded exercises, the workspace should behave like practice, not a demo: the problem statement should stay visible, schema should default to read-only reference, and the canonical solution should stay hidden until the user asks for it.
 
-Built-in exercises should open in Query mode by default. Custom imports should open in Setup mode by default.
+While writing SQL, users should keep schema context visible without leaving the query workspace. Query should feel like the main canvas, but not a blind one.
+
+Built-in exercises should bias toward quick orientation before isolated querying, and custom imports should continue to open in Setup mode by default.
 
 ### Narrow Scope Wins
 
@@ -117,6 +123,7 @@ A good v1 lets a user:
 7. Keep using the last valid dataset until the draft is fixed
 8. Switch to a query-focused workspace with enough room to work
 9. Run SQL successfully and iterate quickly
+10. Understand which SQL dialect an exercise or imported prompt expects
 
 If the app still feels slower or more fragile than manually setting up a local database, v1 is not good enough.
 
