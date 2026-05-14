@@ -1,0 +1,438 @@
+:root {
+  color: #201914;
+  background:
+    radial-gradient(circle at top left, rgba(191, 87, 57, 0.15), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(47, 78, 67, 0.18), transparent 30%),
+    linear-gradient(180deg, #f7f0e3 0%, #efe3cf 100%);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: #201914;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.studio-shell {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.exercise-rail {
+  background: linear-gradient(180deg, rgba(28, 39, 35, 0.96), rgba(22, 28, 27, 0.98));
+  color: #f3e8d4;
+  padding: 28px 20px;
+  border-right: 1px solid rgba(243, 232, 212, 0.12);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
+}
+
+.rail-brand h1,
+.studio-toolbar h2,
+.prompt-card h3,
+.import-card h3 {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.rail-kicker,
+.studio-kicker,
+.prompt-kicker,
+.dataset-status-kicker {
+  font-size: 0.73rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(243, 232, 212, 0.72);
+}
+
+.rail-brand p {
+  color: rgba(243, 232, 212, 0.78);
+  margin: 10px 0 0;
+}
+
+.exercise-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.exercise-card {
+  background: rgba(255, 249, 239, 0.06);
+  border: 1px solid rgba(243, 232, 212, 0.1);
+  border-left: 4px solid transparent;
+  border-radius: 18px;
+  padding: 14px 14px 16px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.exercise-card:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 249, 239, 0.1);
+}
+
+.exercise-card.active {
+  border-left-color: #d46d44;
+  background: rgba(212, 109, 68, 0.13);
+  border-color: rgba(212, 109, 68, 0.28);
+}
+
+.exercise-card-topline,
+.exercise-meta,
+.prompt-pill-row,
+.exercise-tags,
+.studio-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.exercise-case-number,
+.exercise-company,
+.exercise-meta span,
+.exercise-tags span,
+.studio-status-chip,
+.prompt-pill,
+.dataset-source-chip,
+.dataset-generated-chip,
+.generated-row-chip {
+  font-size: 0.75rem;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.exercise-case-number {
+  background: rgba(243, 232, 212, 0.14);
+  color: #f8efde;
+}
+
+.exercise-company,
+.exercise-meta span,
+.exercise-tags span {
+  background: rgba(243, 232, 212, 0.09);
+  color: rgba(243, 232, 212, 0.82);
+}
+
+.exercise-card-title {
+  margin-top: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.exercise-card-summary {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: rgba(243, 232, 212, 0.78);
+}
+
+.studio-main {
+  padding: 26px;
+}
+
+.studio-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+.studio-toolbar h2 {
+  font-size: clamp(2rem, 4vw, 3.15rem);
+  color: #251611;
+}
+
+.studio-kicker {
+  color: #8f5e43;
+}
+
+.studio-status-chip,
+.dataset-source-chip,
+.prompt-pill {
+  background: rgba(67, 92, 79, 0.12);
+  color: #32453a;
+}
+
+.dataset-generated-chip,
+.generated-row-chip {
+  background: rgba(212, 109, 68, 0.14);
+  color: #8f4c2f;
+}
+
+.ghost-action,
+.run-button {
+  border-radius: 999px;
+  border: 1px solid #1d2924;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.ghost-action {
+  background: transparent;
+  color: #1d2924;
+  padding: 10px 14px;
+}
+
+.run-button {
+  background: linear-gradient(135deg, #213129, #3e5d4f);
+  color: #f8f2e7;
+  padding: 10px 18px;
+  margin-bottom: 12px;
+}
+
+.ghost-action:hover,
+.run-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.run-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.workspace-mode-bar {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  margin: 0 0 18px;
+  border-radius: 999px;
+  background: rgba(252, 247, 240, 0.7);
+  border: 1px solid rgba(83, 64, 48, 0.12);
+  box-shadow: 0 14px 36px rgba(72, 48, 31, 0.06);
+}
+
+.workspace-mode-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 16px;
+  background: transparent;
+  color: #5a4b3d;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.workspace-mode-button:hover {
+  transform: translateY(-1px);
+}
+
+.workspace-mode-button.active {
+  background: linear-gradient(135deg, #213129, #3e5d4f);
+  color: #f8f2e7;
+}
+
+.workspace-layout {
+  display: block;
+}
+
+.workspace-brief-column,
+.workspace-query-column {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+
+.workspace-brief-column[hidden],
+.workspace-query-column[hidden] {
+  display: none !important;
+}
+
+.prompt-card,
+.practice-brief-card,
+.import-card,
+.warning-panel,
+.evidence-panel,
+.dataset-status-card,
+.workbench-panel,
+.empty-workbench {
+  background: rgba(252, 247, 240, 0.88);
+  border: 1px solid rgba(83, 64, 48, 0.13);
+  border-radius: 24px;
+  box-shadow: 0 22px 60px rgba(72, 48, 31, 0.08);
+}
+
+.prompt-card,
+.practice-brief-card,
+.import-card,
+.dataset-status-card,
+.warning-panel,
+.evidence-panel,
+.empty-workbench {
+  padding: 18px;
+}
+
+.prompt-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.prompt-card h3,
+.practice-brief-card h3,
+.import-card h3 {
+  font-size: 1.75rem;
+  color: #281711;
+}
+
+.prompt-summary {
+  margin: 10px 0 0;
+  color: #5f5045;
+}
+
+.prompt-text-block {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(247, 241, 232, 0.95), rgba(240, 232, 221, 0.92));
+  border: 1px solid rgba(83, 64, 48, 0.1);
+  max-height: 280px;
+  overflow: auto;
+}
+
+.prompt-text-block pre {
+  margin: 0;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.84rem;
+  white-space: pre-wrap;
+}
+
+.dataset-status-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.dataset-source-row,
+.table-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.schema-edit-row,
+.practice-action-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.practice-action-row {
+  margin-bottom: 12px;
+}
+
+.answer-feedback {
+  margin: 0 0 12px;
+  color: #32453a;
+}
+
+.dataset-status-kicker {
+  color: #7b644e;
+  margin-bottom: 4px;
+}
+
+.workbench-panel {
+  padding: 18px;
+}
+
+.workbench-panel-header p {
+  margin: 0 0 12px;
+  color: #71614d;
+  font-size: 0.86rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.empty-workbench {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  color: #655645;
+}
+
+.import-card textarea,
+.evidence-panel input,
+.evidence-panel select,
+.evidence-panel button,
+.prompt-card button {
+  border-radius: 12px;
+}
+
+.import-card textarea,
+.evidence-panel input,
+.evidence-panel select {
+  width: 100%;
+  border: 1px solid rgba(83, 64, 48, 0.18);
+  background: rgba(255, 252, 248, 0.94);
+  padding: 9px 10px;
+}
+
+.evidence-panel h2 {
+  margin-top: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.3rem;
+}
+
+.column-type-label {
+  margin-top: 4px;
+  color: #7b644e;
+  font-size: 0.82rem;
+}
+
+.table-join-hint {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: #7b644e;
+}
+
+.evidence-panel table {
+  width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .studio-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .exercise-rail {
+    position: static;
+    height: auto;
+  }
+
+  .studio-toolbar {
+    flex-direction: column;
+  }
+}

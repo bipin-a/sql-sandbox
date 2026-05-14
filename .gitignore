@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+*.log
+.vite
+.playwright-cli/
+test-results/
+.claude/
+output/
+tsconfig.tsbuildinfo
