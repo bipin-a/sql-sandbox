@@ -1,4 +1,4 @@
-import type { CellValue, Column, QuestionModel } from "./questionModel";
+import type { CellValue, Column, ColumnReference, QuestionModel } from "./questionModel";
 import { inferSharedJoinColumns } from "./relationships";
 
 const STATUS_VALUES = ["pending", "processing", "completed", "cancelled"] as const;
@@ -174,20 +174,89 @@ export function generateMockRows(
   return generateTableRows(columns, rowCount, new Map());
 }
 
+function findReferencedColumn(
+  question: QuestionModel,
+  reference: ColumnReference,
+): { tableIndex: number; columnIndex: number } | null {
+  for (let tableIndex = 0; tableIndex < question.tables.length; tableIndex += 1) {
+    const table = question.tables[tableIndex];
+    if (table.name.trim() !== reference.table.trim()) continue;
+
+    for (let columnIndex = 0; columnIndex < table.columns.length; columnIndex += 1) {
+      if (table.columns[columnIndex].name.trim() === reference.column.trim()) {
+        return { tableIndex, columnIndex };
+      }
+    }
+  }
+
+  return null;
+}
+
+function fallbackColumnValues(
+  column: Column,
+  rowCount: number,
+  sharedIdPools: Map<string, number[]>,
+): CellValue[] {
+  const sharedIdPool = sharedIdPools.get(normalizeColumnName(column.name));
+  if (sharedIdPool) return sharedIdPool;
+
+  return Array.from({ length: rowCount }, (_, rowIndex) => generateCellValue(column, rowIndex));
+}
+
 export function ensureQuestionSampleRows(
   question: QuestionModel,
   rowCount = DEFAULT_ROW_COUNT,
 ): QuestionModel {
   const sharedIdPools = buildSharedIdPools(question, rowCount);
+  const resolvedColumnValues = new Map<string, CellValue[]>();
+  const resolvingColumnKeys = new Set<string>();
+
+  function resolveColumnValues(tableIndex: number, columnIndex: number): CellValue[] {
+    const key = `${tableIndex}:${columnIndex}`;
+    const existingValues = resolvedColumnValues.get(key);
+    if (existingValues) return existingValues;
+
+    const column = question.tables[tableIndex].columns[columnIndex];
+    if (resolvingColumnKeys.has(key)) {
+      return fallbackColumnValues(column, rowCount, sharedIdPools);
+    }
+
+    resolvingColumnKeys.add(key);
+
+    let nextValues: CellValue[];
+    if (column.references) {
+      const referencedLocation = findReferencedColumn(question, column.references);
+      if (referencedLocation) {
+        const targetValues = resolveColumnValues(
+          referencedLocation.tableIndex,
+          referencedLocation.columnIndex,
+        );
+        nextValues = Array.from(
+          { length: rowCount },
+          (_, rowIndex) => targetValues[rowIndex % targetValues.length],
+        );
+      } else {
+        nextValues = fallbackColumnValues(column, rowCount, sharedIdPools);
+      }
+    } else {
+      nextValues = fallbackColumnValues(column, rowCount, sharedIdPools);
+    }
+
+    resolvingColumnKeys.delete(key);
+    resolvedColumnValues.set(key, nextValues);
+    return nextValues;
+  }
 
   return {
     ...question,
-    tables: question.tables.map((table) =>
+    tables: question.tables.map((table, tableIndex) =>
       table.rows.length > 0
         ? table
         : {
             ...table,
-            rows: generateTableRows(table.columns, rowCount, sharedIdPools),
+            rows: Array.from({ length: rowCount }, (_, rowIndex) =>
+              table.columns.map((_, columnIndex) => resolveColumnValues(tableIndex, columnIndex)[rowIndex]),
+            ),
             sampleRowsMode: "generated",
           },
     ),

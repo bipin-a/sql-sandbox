@@ -1,4 +1,4 @@
-import type { QuestionModel } from "./questionModel";
+import type { ColumnReference, QuestionModel } from "./questionModel";
 
 function normalizeColumnName(columnName: string): string {
   return columnName.trim().toLowerCase();
@@ -6,6 +6,10 @@ function normalizeColumnName(columnName: string): string {
 
 function isJoinableIdColumnName(columnName: string): boolean {
   return normalizeColumnName(columnName).endsWith("_id");
+}
+
+export function formatReferenceTarget(reference: ColumnReference): string {
+  return `${reference.table}.${reference.column}`;
 }
 
 export function inferSharedJoinColumns(question: QuestionModel): string[] {
@@ -29,11 +33,29 @@ export function inferSharedJoinColumns(question: QuestionModel): string[] {
 export function inferJoinHintsByTable(question: QuestionModel): string[][] {
   const sharedJoinColumns = new Set(inferSharedJoinColumns(question));
 
+  return question.tables.map((table) => {
+    const hintNames: string[] = [];
+
+    table.columns.forEach((column) => {
+      const normalizedName = normalizeColumnName(column.name);
+      if (
+        (sharedJoinColumns.has(normalizedName) || column.references) &&
+        !hintNames.includes(normalizedName)
+      ) {
+        hintNames.push(normalizedName);
+      }
+    });
+
+    return hintNames;
+  });
+}
+
+export function inferExplicitReferenceLabelsByTable(question: QuestionModel): string[][] {
   return question.tables.map((table) =>
-    table.columns
-      .map((column) => normalizeColumnName(column.name))
-      .filter((columnName, columnIndex, names) => {
-        return sharedJoinColumns.has(columnName) && names.indexOf(columnName) === columnIndex;
-      }),
+    table.columns.flatMap((column) =>
+      column.references
+        ? [`${table.name}.${column.name} -> ${formatReferenceTarget(column.references)}`]
+        : [],
+    ),
   );
 }

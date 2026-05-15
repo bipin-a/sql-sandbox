@@ -4,6 +4,7 @@ dist
 *.log
 .vite
 .playwright-cli/
+.playwright-mcp/
 test-results/
 .claude/
 output/

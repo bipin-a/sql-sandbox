@@ -43,7 +43,7 @@ export interface SeedExerciseDefinition {
   prompt: string;
   initialQuery: string;
   initialQuestion?: QuestionModel | null;
-  mode?: "seeded" | "custom";
+  mode?: "seeded" | "custom" | "new-schema";
   sourceLabel?: string;
 }
 

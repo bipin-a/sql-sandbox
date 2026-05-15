@@ -380,4 +380,58 @@ dasher_id trip_id estimated_delivery_timestamp actual_delivery_timestamp
     ]);
     expect(parsed.warnings).toEqual([]);
   });
+
+  it("ignores Example Output blocks instead of treating them as additional input rows", () => {
+    const input = `
+deliveries Table:
+Column Name\tType
+delivery_id\tinteger
+recipe_id\tinteger
+recipe_name\tstring
+prepared_time\ttimestamp
+delivered_time\ttimestamp
+
+deliveries Example Input:
+delivery_id\trecipe_id\trecipe_name\tprepared_time\tdelivered_time
+1\t10\tChicken Curry\t06/07/2022 09:00:00\t06/07/2022 13:00:00
+2\t20\tVegetable Stir Fry\t06/07/2022 09:30:00\t06/07/2022 13:30:00
+
+Example Output:
+recipe_id\trecipe_name\tavg_delivery_time_hours
+10\tChicken Curry\t3.75
+20\tVegetable Stir Fry\t4.00
+`.trim();
+
+    const parsed = parseSchemaText(input);
+
+    expect(parsed.tables).toEqual([
+      {
+        name: "deliveries",
+        columns: [
+          { name: "delivery_id", type: "integer" },
+          { name: "recipe_id", type: "integer" },
+          { name: "recipe_name", type: "string" },
+          { name: "prepared_time", type: "timestamp" },
+          { name: "delivered_time", type: "timestamp" },
+        ],
+        rows: [
+          [
+            1,
+            10,
+            "Chicken Curry",
+            new Date("2022-06-07T09:00:00Z"),
+            new Date("2022-06-07T13:00:00Z"),
+          ],
+          [
+            2,
+            20,
+            "Vegetable Stir Fry",
+            new Date("2022-06-07T09:30:00Z"),
+            new Date("2022-06-07T13:30:00Z"),
+          ],
+        ],
+      },
+    ]);
+    expect(parsed.warnings).toEqual([]);
+  });
 });

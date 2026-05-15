@@ -5,7 +5,7 @@ test("schema-only import generates sample data and runs in Query mode", async ({
 }) => {
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Open Custom Import" }).click();
+  await page.getByRole("button", { name: "Import prompt/schema" }).click();
   await expect(page.getByRole("button", { name: "Setup" })).toHaveAttribute(
     "aria-pressed",
     "true",

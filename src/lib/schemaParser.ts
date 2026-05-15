@@ -177,6 +177,10 @@ export function parseSchemaText(input: string): QuestionModel {
         lineIndex < blockEnd &&
         new RegExp(`^${escapeRegExp(tableName)}\\s+Example Input:$`, "i").test(line),
     );
+    const outputHeaderIndex = lines.findIndex(
+      (line, lineIndex) =>
+        lineIndex > index && lineIndex < blockEnd && /^Example Output:$/i.test(line),
+    );
 
     const columnBlockEnd = exampleHeaderIndex === -1 ? blockEnd : exampleHeaderIndex;
     const columnLines = lines
@@ -194,7 +198,10 @@ export function parseSchemaText(input: string): QuestionModel {
       exampleHeaderIndex === -1
         ? []
         : lines
-            .slice(exampleHeaderIndex + 2, blockEnd)
+            .slice(
+              exampleHeaderIndex + 2,
+              outputHeaderIndex === -1 ? blockEnd : outputHeaderIndex,
+            )
             .filter((line) => !isMarkdownSeparatorLine(line));
     const rows = rowLines.map((line) => {
       const { cells, fieldCount } = splitRowFields(columns, line);

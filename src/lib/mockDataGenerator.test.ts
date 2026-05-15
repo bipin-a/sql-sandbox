@@ -131,4 +131,42 @@ describe("mockDataGenerator", () => {
     expect(orders.rows.map((row) => row[1])).not.toEqual([1, 2, 3]);
     expect(orders.rows.map((row) => row[0])).toEqual([1, 2, 3]);
   });
+
+  it("maps explicitly referenced generated ids to existing target rows even when names differ", () => {
+    const question: QuestionModel = {
+      tables: [
+        {
+          name: "orders",
+          columns: [
+            { name: "order_id", type: "integer" },
+            {
+              name: "buyer_id",
+              type: "integer",
+              references: { table: "customers", column: "customer_id" },
+            },
+          ],
+          rows: [],
+        },
+        {
+          name: "customers",
+          columns: [
+            { name: "customer_id", type: "integer" },
+            { name: "customer_name", type: "string" },
+          ],
+          rows: [],
+        },
+        {
+          name: "invoices",
+          columns: [{ name: "customer_id", type: "integer" }],
+          rows: [],
+        },
+      ],
+    };
+
+    const result = ensureQuestionSampleRows(question, 3);
+    const [orders, customers] = result.tables;
+
+    expect(orders.rows.map((row) => row[1])).toEqual(customers.rows.map((row) => row[0]));
+    expect(orders.rows.map((row) => row[1])).not.toEqual([1, 2, 3]);
+  });
 });

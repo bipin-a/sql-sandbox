@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function runSeededSolution(page: Page, title: string) {
+  await page.getByRole("button", { name: /Practice with sample data/i }).click();
   await page.getByRole("button", { name: `Open ${title}` }).click();
-  await page.getByRole("button", { name: "Query" }).click();
   await page.getByRole("button", { name: "Reveal solution", exact: true }).click();
   await page.getByRole("button", { name: "Run", exact: true }).click();
 }

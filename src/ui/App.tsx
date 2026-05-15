@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CellValue,
+  ColumnReference,
   ColumnType,
   ParseWarning,
   QuestionModel,
@@ -10,12 +11,15 @@ import { createRunner } from "../lib/duckdbRunner";
 import { compareQueryResults } from "../lib/duckdbRunner";
 import type { QueryResult, Runner } from "../lib/duckdbRunner";
 import { ensureQuestionSampleRows } from "../lib/mockDataGenerator";
-import { inferJoinHintsByTable } from "../lib/relationships";
+import {
+  formatReferenceTarget,
+  inferExplicitReferenceLabelsByTable,
+  inferJoinHintsByTable,
+} from "../lib/relationships";
 import { parseSchemaText } from "../lib/schemaParser";
 import { isSupportedTimestampText, parseTimestampText } from "../lib/timestamps";
 import {
   defaultExercises,
-  defaultInitialExerciseId,
   type SeedExerciseDefinition,
 } from "../seed/exercises";
 import { QueryEditor } from "./QueryEditor";
@@ -38,7 +42,6 @@ export function App() {
   return (
     <SqlPracticeStudio
       exercises={defaultExercises}
-      initialExerciseId={defaultInitialExerciseId}
       createRunner={createRunner}
     />
   );
@@ -52,95 +55,270 @@ interface SqlPracticeStudioProps {
   createRunner: () => Promise<Runner>;
 }
 
+interface WorkspaceSessionSnapshot {
+  importText: string;
+  draftQuestion: QuestionModel | null;
+  appliedQuestion: QuestionModel | null;
+  workspaceMode: WorkspaceMode;
+  isSchemaEditing: boolean;
+  isQuerySchemaVisible: boolean;
+  validationErrors: ValidationErrorMap;
+  pendingDraftKeys: PendingDraftMap;
+}
+
 export function SqlPracticeStudio({
   exercises,
   initialExerciseId,
   createRunner,
 }: SqlPracticeStudioProps) {
-  const [selectedExerciseId, setSelectedExerciseId] = useState(
-    initialExerciseId ?? exercises[0]?.id ?? "",
+  const practiceExercises = exercises.filter(
+    (exercise) => exercise.mode !== "custom" && exercise.mode !== "new-schema",
   );
-  const [sessionVersion, setSessionVersion] = useState(0);
+  const customImportExercise = exercises.find((exercise) => exercise.mode === "custom") ?? null;
+  const newSchemaExercise: ExerciseDefinition = {
+    id: "new-schema",
+    title: "New Schema",
+    company: "From Scratch",
+    difficulty: "Authoring",
+    themes: ["tables", "columns", "relationships"],
+    summary: "Start from a blank schema and build the dataset you want to query.",
+    prompt: "",
+    initialQuestion: null,
+    initialQuery: "",
+    mode: "new-schema",
+    sourceLabel: "Structured authoring",
+  };
+
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(initialExerciseId ?? null);
+  const [sessionVersionBySource, setSessionVersionBySource] = useState<Record<string, number>>({});
+  const [savedSourceSessions, setSavedSourceSessions] = useState<
+    Record<string, WorkspaceSessionSnapshot | undefined>
+  >({});
+  const [isResetConfirming, setIsResetConfirming] = useState(false);
 
   const selectedExercise =
-    exercises.find((exercise) => exercise.id === selectedExerciseId) ?? exercises[0];
+    selectedExerciseId === null
+      ? null
+      : selectedExerciseId === newSchemaExercise.id
+      ? newSchemaExercise
+      : exercises.find((exercise) => exercise.id === selectedExerciseId) ??
+        practiceExercises[0] ??
+        customImportExercise ??
+        newSchemaExercise;
 
-  if (!selectedExercise) return null;
+  function chooseSource(nextExerciseId: string) {
+    setSelectedExerciseId(nextExerciseId);
+    setIsResetConfirming(false);
+  }
+
+  function resetCurrentSource() {
+    if (!selectedExerciseId) return;
+
+    setSavedSourceSessions((currentSessions) => ({
+      ...currentSessions,
+      [selectedExerciseId]: undefined,
+    }));
+    setSessionVersionBySource((currentVersions) => ({
+      ...currentVersions,
+      [selectedExerciseId]: (currentVersions[selectedExerciseId] ?? 0) + 1,
+    }));
+    setIsResetConfirming(false);
+  }
+
+  function handleGoHome() {
+    setSelectedExerciseId(null);
+    setIsResetConfirming(false);
+  }
+
+  const handleSessionChange = useCallback(
+    (nextSession: WorkspaceSessionSnapshot) => {
+      if (!selectedExerciseId) return;
+      setSavedSourceSessions((currentSessions) => ({
+        ...currentSessions,
+        [selectedExerciseId]: nextSession,
+      }));
+    },
+    [selectedExerciseId],
+  );
+
+  if (!selectedExercise) {
+    return (
+      <div className="studio-shell">
+        <main className="studio-main">
+          <HomeChooser
+            practiceExercises={practiceExercises}
+            customImportExercise={customImportExercise}
+            newSchemaExercise={newSchemaExercise}
+            onChooseSource={chooseSource}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  const isPracticeSource =
+    selectedExercise.mode !== "custom" && selectedExercise.mode !== "new-schema";
+  const showInlineResetConfirm = isResetConfirming && !isPracticeSource;
+  const currentSessionVersion = sessionVersionBySource[selectedExercise.id] ?? 0;
 
   return (
     <div className="studio-shell">
-      <aside className="exercise-rail">
-        <div className="rail-brand">
-          <div className="rail-kicker">Casefile Desk</div>
-          <h1>SQL Playground</h1>
-          <p>Curated drills, editable evidence, real DuckDB queries.</p>
-        </div>
-
-        <div className="exercise-list" aria-label="Exercise library">
-          {exercises.map((exercise, index) => {
-            const active = exercise.id === selectedExercise.id;
-            return (
-              <button
-                key={exercise.id}
-                className={`exercise-card${active ? " active" : ""}`}
-                onClick={() => {
-                  setSelectedExerciseId(exercise.id);
-                  setSessionVersion(0);
-                }}
-                aria-pressed={active}
-                aria-label={`Open ${exercise.title}`}
-              >
-                <div className="exercise-card-topline">
-                  <span className="exercise-case-number">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="exercise-company">{exercise.company}</span>
-                </div>
-                <div className="exercise-card-title">{exercise.title}</div>
-                <div className="exercise-card-summary">{exercise.summary}</div>
-                <div className="exercise-meta">
-                  <span>{exercise.difficulty}</span>
-                  <span>{exercise.initialQuestion?.tables.length ?? 0} tables</span>
-                </div>
-                <div className="exercise-tags">
-                  {exercise.themes.map((theme) => (
-                    <span key={theme}>{theme}</span>
-                  ))}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </aside>
-
       <main className="studio-main">
+        <div className="studio-brandbar">
+          <div>
+            <h1>SQL Playground</h1>
+          </div>
+          <p>Practice SQL fast, or bring your own schema and start querying.</p>
+        </div>
         <header className="studio-toolbar">
           <div>
-            <div className="studio-kicker">{selectedExercise.company}</div>
-            <h2>{selectedExercise.title}</h2>
+            <div className="studio-title-row">
+              <h2>{selectedExercise.title}</h2>
+              {isPracticeSource && (
+                <span className="studio-status-chip">{selectedExercise.difficulty}</span>
+              )}
+            </div>
+            <p className="studio-source-summary">
+              {isPracticeSource ? selectedExercise.summary : selectedExercise.title}
+            </p>
           </div>
           <div className="studio-toolbar-actions">
-            <span className="studio-status-chip">{selectedExercise.difficulty}</span>
-            <button
-              className="ghost-action"
-              onClick={() => setSessionVersion((version) => version + 1)}
-            >
-              Reset case
+            <button className="ghost-action" onClick={handleGoHome}>
+              Home
             </button>
+            {showInlineResetConfirm ? (
+              <div className="inline-confirm-row">
+                <span className="inline-confirm-copy">Reset this work?</span>
+                <button className="ghost-action" onClick={resetCurrentSource}>
+                  Yes, reset
+                </button>
+                <button className="ghost-action" onClick={() => setIsResetConfirming(false)}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                className="ghost-action"
+                onClick={() => {
+                  if (isPracticeSource) {
+                    resetCurrentSource();
+                    return;
+                  }
+                  setIsResetConfirming(true);
+                }}
+              >
+                Reset
+              </button>
+            )}
           </div>
         </header>
 
         <SqlPlaygroundImportApp
-          key={`${selectedExercise.id}:${sessionVersion}`}
+          key={`${selectedExercise.id}:${currentSessionVersion}`}
           initialImportText={selectedExercise.prompt}
           initialQuestion={selectedExercise.initialQuestion ?? null}
           initialQuery={selectedExercise.initialQuery}
           createRunner={createRunner}
           exercise={selectedExercise}
           readOnlyImport={selectedExercise.mode !== "custom"}
+          savedSession={savedSourceSessions[selectedExercise.id]}
+          onSessionChange={handleSessionChange}
         />
       </main>
     </div>
+  );
+}
+
+function HomeChooser({
+  practiceExercises,
+  customImportExercise,
+  newSchemaExercise,
+  onChooseSource,
+}: {
+  practiceExercises: ExerciseDefinition[];
+  customImportExercise: ExerciseDefinition | null;
+  newSchemaExercise: ExerciseDefinition;
+  onChooseSource: (exerciseId: string) => void;
+}) {
+  const defaultPracticeExercise = practiceExercises[0] ?? null;
+  const [activeIntent, setActiveIntent] = useState<"practice" | null>(null);
+
+  return (
+    <section className="home-chooser" aria-label="Home chooser">
+      <div className="home-chooser-header">
+        <h1>SQL Playground</h1>
+        <p>
+          Choose one path. Practice on a ready-made dataset, or bring tables you want to
+          query.
+        </p>
+      </div>
+      <div className="home-choice-grid">
+        <button
+          className="home-choice-card"
+          onClick={() => setActiveIntent("practice")}
+          disabled={!defaultPracticeExercise}
+        >
+          <span className="home-choice-kicker">I need data</span>
+          <span className="home-choice-title">Practice with sample data</span>
+          <span className="home-choice-copy">
+            Pick a curated SQL prompt and work against a ready-to-query dataset.
+          </span>
+          {defaultPracticeExercise && (
+            <span className="home-choice-footnote">
+              {practiceExercises.length} sample prompts available
+            </span>
+          )}
+        </button>
+
+        <section className="home-choice-card home-choice-card-panel" aria-label="Use my own tables">
+          <span className="home-choice-kicker">I have tables</span>
+          <span className="home-choice-title">Use my own tables</span>
+          <span className="home-choice-copy">
+            Import a schema from a prompt, or create tables from scratch.
+          </span>
+          <div className="home-choice-actions">
+            {customImportExercise && (
+              <button
+                className="home-choice-action"
+                onClick={() => onChooseSource(customImportExercise.id)}
+              >
+                Import prompt/schema
+              </button>
+            )}
+            <button
+              className="home-choice-action"
+              onClick={() => onChooseSource(newSchemaExercise.id)}
+            >
+              Create schema
+            </button>
+          </div>
+        </section>
+      </div>
+      {activeIntent === "practice" && (
+        <section className="home-secondary-panel" aria-label="Choose sample prompt">
+          <div>
+            <h2>Choose a sample prompt</h2>
+            <p>Start with one curated dataset. You can return Home whenever you want.</p>
+          </div>
+          <div className="home-practice-list">
+            {practiceExercises.map((exercise) => (
+              <button
+                key={exercise.id}
+                className="home-practice-row"
+                onClick={() => onChooseSource(exercise.id)}
+                aria-label={`Open ${exercise.title}`}
+              >
+                <span>
+                  <strong>{exercise.title}</strong>
+                  <span>{exercise.summary}</span>
+                </span>
+                <span className="home-practice-meta">{exercise.difficulty}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+    </section>
   );
 }
 
@@ -152,6 +330,8 @@ interface SqlPlaygroundImportAppProps {
   parseImportText?: (input: string) => QuestionModel;
   exercise?: ExerciseDefinition;
   readOnlyImport?: boolean;
+  savedSession?: WorkspaceSessionSnapshot;
+  onSessionChange?: (session: WorkspaceSessionSnapshot) => void;
 }
 
 export function SqlPlaygroundImportApp({
@@ -162,17 +342,61 @@ export function SqlPlaygroundImportApp({
   parseImportText = parseSchemaText,
   exercise,
   readOnlyImport = false,
+  savedSession,
+  onSessionChange,
 }: SqlPlaygroundImportAppProps) {
-  const [importText, setImportText] = useState(initialImportText);
-  const [draftQuestion, setDraftQuestion] = useState<QuestionModel | null>(initialQuestion);
-  const [appliedQuestion, setAppliedQuestion] = useState<QuestionModel | null>(
-    initialQuestion,
+  const isNewSchema = exercise?.mode === "new-schema";
+  const isSeededPractice = !!exercise && exercise.mode !== "custom" && exercise.mode !== "new-schema";
+  const requiresExplicitApply = isNewSchema;
+  const initialDraftQuestion =
+    initialQuestion ?? (isNewSchema ? { tables: [] satisfies QuestionModel["tables"] } : null);
+  const initialWorkspaceMode: WorkspaceMode =
+    exercise?.mode === "custom" || isNewSchema || !readOnlyImport
+      ? "setup"
+      : "query";
+  const [importText, setImportText] = useState(savedSession?.importText ?? initialImportText);
+  const [draftQuestion, setDraftQuestion] = useState<QuestionModel | null>(
+    savedSession?.draftQuestion ?? initialDraftQuestion,
   );
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("setup");
-  const [isSchemaEditing, setIsSchemaEditing] = useState(false);
-  const [isQuerySchemaVisible, setIsQuerySchemaVisible] = useState(true);
-  const [validationErrors, setValidationErrors] = useState<ValidationErrorMap>({});
-  const [pendingDraftKeys, setPendingDraftKeys] = useState<PendingDraftMap>({});
+  const [appliedQuestion, setAppliedQuestion] = useState<QuestionModel | null>(
+    savedSession?.appliedQuestion ?? initialQuestion,
+  );
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(
+    savedSession?.workspaceMode ?? initialWorkspaceMode,
+  );
+  const [isSchemaEditing, setIsSchemaEditing] = useState(savedSession?.isSchemaEditing ?? false);
+  const [isQuerySchemaVisible, setIsQuerySchemaVisible] = useState(
+    savedSession?.isQuerySchemaVisible ?? true,
+  );
+  const [validationErrors, setValidationErrors] = useState<ValidationErrorMap>(
+    savedSession?.validationErrors ?? {},
+  );
+  const [pendingDraftKeys, setPendingDraftKeys] = useState<PendingDraftMap>(
+    savedSession?.pendingDraftKeys ?? {},
+  );
+
+  useEffect(() => {
+    onSessionChange?.({
+      importText,
+      draftQuestion,
+      appliedQuestion,
+      workspaceMode,
+      isSchemaEditing,
+      isQuerySchemaVisible,
+      validationErrors,
+      pendingDraftKeys,
+    });
+  }, [
+    appliedQuestion,
+    draftQuestion,
+    importText,
+    isQuerySchemaVisible,
+    isSchemaEditing,
+    onSessionChange,
+    pendingDraftKeys,
+    validationErrors,
+    workspaceMode,
+  ]);
 
   function syncDraft(update: (current: QuestionModel) => QuestionModel) {
     setDraftQuestion((currentDraft) => {
@@ -181,11 +405,102 @@ export function SqlPlaygroundImportApp({
       const evaluation = evaluateDraftQuestion(nextDraft);
       setValidationErrors(evaluation.validationErrors);
       setPendingDraftKeys(evaluation.pendingDraftKeys);
-      if (evaluation.appliedQuestion) {
+      if (evaluation.appliedQuestion && !requiresExplicitApply) {
         setAppliedQuestion(evaluation.appliedQuestion);
       }
       return nextDraft;
     });
+  }
+
+  function handleAddTable() {
+    syncDraft((current) => ({
+      ...current,
+      tables: [
+        ...current.tables,
+        {
+          name: `table_${current.tables.length + 1}`,
+          columns: [{ name: "column_1", type: "integer" }],
+          rows: [],
+        },
+      ],
+    }));
+  }
+
+  function handleRemoveTable(tableIndex: number) {
+    syncDraft((current) => {
+      const removedTableName = current.tables[tableIndex]?.name;
+
+      return {
+        ...current,
+        tables: current.tables
+          .filter((_, currentTableIndex) => currentTableIndex !== tableIndex)
+          .map((table) => ({
+            ...table,
+            columns: table.columns.map((column) =>
+              column.references?.table === removedTableName
+                ? { ...column, references: undefined }
+                : column,
+            ),
+          })),
+      };
+    });
+  }
+
+  function handleAddColumn(tableIndex: number) {
+    syncDraft((current) => ({
+      ...current,
+      tables: current.tables.map((table, currentTableIndex) =>
+        currentTableIndex === tableIndex
+          ? {
+              ...table,
+              columns: [
+                ...table.columns,
+                {
+                  name: `column_${table.columns.length + 1}`,
+                  type: "string",
+                  references: undefined,
+                },
+              ],
+            }
+          : table,
+      ),
+    }));
+  }
+
+  function handleRemoveColumn(tableIndex: number, columnIndex: number) {
+    syncDraft((current) => {
+      const currentTable = current.tables[tableIndex];
+      const removedColumnName = currentTable?.columns[columnIndex]?.name;
+
+      return {
+        ...current,
+        tables: current.tables.map((table, currentTableIndex) => {
+          const nextColumns =
+            currentTableIndex === tableIndex
+              ? table.columns.filter((_, currentColumnIndex) => currentColumnIndex !== columnIndex)
+              : table.columns;
+
+          return {
+            ...table,
+            columns: nextColumns.map((column) =>
+              column.references?.table === currentTable?.name &&
+              column.references.column === removedColumnName
+                ? { ...column, references: undefined }
+                : column,
+            ),
+          };
+        }),
+      };
+    });
+  }
+
+  function handleApplySchema() {
+    if (!draftQuestion) return;
+    const evaluation = evaluateDraftQuestion(draftQuestion);
+    setValidationErrors(evaluation.validationErrors);
+    setPendingDraftKeys(evaluation.pendingDraftKeys);
+    if (!evaluation.appliedQuestion) return;
+    setAppliedQuestion(ensureQuestionSampleRows(evaluation.appliedQuestion));
   }
 
   function handleImport() {
@@ -205,17 +520,32 @@ export function SqlPlaygroundImportApp({
   }
 
   function handleTableNameChange(tableIndex: number, nextValue: string) {
-    syncDraft((current) => ({
-      ...current,
-      tables: current.tables.map((table, currentTableIndex) =>
-        currentTableIndex === tableIndex
-          ? {
-              ...table,
-              name: nextValue,
-            }
-          : table,
-      ),
-    }));
+    syncDraft((current) => {
+      const previousName = current.tables[tableIndex]?.name;
+
+      return {
+        ...current,
+        tables: current.tables.map((table, currentTableIndex) => ({
+          ...(currentTableIndex === tableIndex
+            ? {
+                ...table,
+                name: nextValue,
+              }
+            : table),
+          columns: table.columns.map((column) =>
+            column.references?.table === previousName
+              ? {
+                  ...column,
+                  references: {
+                    ...column.references,
+                    table: nextValue,
+                  },
+                }
+              : column,
+          ),
+        })),
+      };
+    });
   }
 
   function handleColumnNameChange(
@@ -223,23 +553,40 @@ export function SqlPlaygroundImportApp({
     columnIndex: number,
     nextValue: string,
   ) {
-    syncDraft((current) => ({
-      ...current,
-      tables: current.tables.map((table, currentTableIndex) => {
-        if (currentTableIndex !== tableIndex) return table;
-        return {
+    syncDraft((current) => {
+      const sourceTable = current.tables[tableIndex];
+      const previousName = sourceTable?.columns[columnIndex]?.name;
+
+      return {
+        ...current,
+        tables: current.tables.map((table, currentTableIndex) => ({
           ...table,
-          columns: table.columns.map((column, currentColumnIndex) =>
-            currentColumnIndex === columnIndex
-              ? {
-                  ...column,
-                  name: nextValue,
-                }
-              : column,
-          ),
-        };
-      }),
-    }));
+          columns: table.columns.map((column, currentColumnIndex) => {
+            if (currentTableIndex === tableIndex && currentColumnIndex === columnIndex) {
+              return {
+                ...column,
+                name: nextValue,
+              };
+            }
+
+            if (
+              column.references?.table === sourceTable?.name &&
+              column.references.column === previousName
+            ) {
+              return {
+                ...column,
+                references: {
+                  ...column.references,
+                  column: nextValue,
+                },
+              };
+            }
+
+            return column;
+          }),
+        })),
+      };
+    });
   }
 
   function handleColumnTypeChange(
@@ -266,29 +613,73 @@ export function SqlPlaygroundImportApp({
     }));
   }
 
+  function handleColumnReferenceChange(
+    tableIndex: number,
+    columnIndex: number,
+    nextReference: ColumnReference | undefined,
+  ) {
+    syncDraft((current) => ({
+      ...current,
+      tables: current.tables.map((table, currentTableIndex) => {
+        if (currentTableIndex !== tableIndex) return table;
+        return {
+          ...table,
+          columns: table.columns.map((column, currentColumnIndex) =>
+            currentColumnIndex === columnIndex
+              ? {
+                  ...column,
+                  references: nextReference,
+                }
+              : column,
+          ),
+        };
+      }),
+    }));
+  }
+
   const hasBlockingDraftState =
     Object.keys(validationErrors).length > 0 || Object.keys(pendingDraftKeys).length > 0;
+  const canApplyAuthoringSchema =
+    requiresExplicitApply &&
+    !!draftQuestion &&
+    draftQuestion.tables.length > 0 &&
+    !hasBlockingDraftState;
   const hasGeneratedSampleRows =
-    draftQuestion?.tables.some((table) => table.sampleRowsMode === "generated") ?? false;
+    appliedQuestion?.tables.some((table) => table.sampleRowsMode === "generated") ?? false;
+  const showWorkspaceModeSwitch = !isSeededPractice;
+  const showDatasetStatusCard =
+    !isSeededPractice || hasGeneratedSampleRows || hasBlockingDraftState || !appliedQuestion;
+  const blockingIssueCount =
+    Object.keys(validationErrors).length + Object.keys(pendingDraftKeys).length;
+  const applySchemaHint =
+    requiresExplicitApply && !canApplyAuthoringSchema && draftQuestion
+      ? draftQuestion.tables.length === 0
+        ? "Add a table to begin."
+        : blockingIssueCount > 0
+          ? `${blockingIssueCount} issue${blockingIssueCount === 1 ? "" : "s"} to fix`
+          : null
+      : null;
 
   return (
     <>
-      <div className="workspace-mode-bar" aria-label="Workspace mode">
-        <button
-          className={`workspace-mode-button${workspaceMode === "setup" ? " active" : ""}`}
-          aria-pressed={workspaceMode === "setup"}
-          onClick={() => setWorkspaceMode("setup")}
-        >
-          Setup
-        </button>
-        <button
-          className={`workspace-mode-button${workspaceMode === "query" ? " active" : ""}`}
-          aria-pressed={workspaceMode === "query"}
-          onClick={() => setWorkspaceMode("query")}
-        >
-          Query
-        </button>
-      </div>
+      {showWorkspaceModeSwitch && (
+        <div className="workspace-mode-bar" aria-label="Workspace mode">
+          <button
+            className={`workspace-mode-button${workspaceMode === "setup" ? " active" : ""}`}
+            aria-pressed={workspaceMode === "setup"}
+            onClick={() => setWorkspaceMode("setup")}
+          >
+            Setup
+          </button>
+          <button
+            className={`workspace-mode-button${workspaceMode === "query" ? " active" : ""}`}
+            aria-pressed={workspaceMode === "query"}
+            onClick={() => setWorkspaceMode("query")}
+          >
+            Query
+          </button>
+        </div>
+      )}
 
       <div
         className={`workspace-layout workspace-layout-${workspaceMode}`}
@@ -299,8 +690,10 @@ export function SqlPlaygroundImportApp({
           hidden={workspaceMode !== "setup"}
           aria-hidden={workspaceMode !== "setup"}
         >
-          {readOnlyImport && exercise ? (
-            <PromptCard exercise={exercise} prompt={importText} />
+          {exercise?.mode === "new-schema" ? (
+            <NewSchemaPlaceholderCard />
+          ) : readOnlyImport && exercise ? (
+            <PromptCard exercise={exercise} />
           ) : (
             <ImportPanel value={importText} onChange={setImportText} onImport={handleImport} />
           )}
@@ -309,7 +702,7 @@ export function SqlPlaygroundImportApp({
             <WarningList warnings={draftQuestion.warnings} />
           )}
 
-          {!readOnlyImport && draftQuestion && (
+          {!readOnlyImport && draftQuestion && !isNewSchema && (
             <div className="schema-edit-row">
               <button
                 className="ghost-action"
@@ -321,14 +714,35 @@ export function SqlPlaygroundImportApp({
           )}
 
           {draftQuestion && (
-            <QuestionPreview
-              question={draftQuestion}
-              editable={readOnlyImport ? false : isSchemaEditing}
-              validationErrors={validationErrors}
-              onTableNameChange={handleTableNameChange}
-              onColumnNameChange={handleColumnNameChange}
-              onColumnTypeChange={handleColumnTypeChange}
-            />
+            <>
+              <QuestionPreview
+                heading={isNewSchema ? "Your schema" : "Tables"}
+                question={draftQuestion}
+                editable={isNewSchema ? true : readOnlyImport ? false : isSchemaEditing}
+                canManageStructure={isNewSchema}
+                validationErrors={validationErrors}
+                onTableNameChange={handleTableNameChange}
+                onColumnNameChange={handleColumnNameChange}
+                onColumnTypeChange={handleColumnTypeChange}
+                onAddTable={handleAddTable}
+                onRemoveTable={handleRemoveTable}
+                onAddColumn={handleAddColumn}
+                onRemoveColumn={handleRemoveColumn}
+                onColumnReferenceChange={handleColumnReferenceChange}
+              />
+              {isNewSchema && (
+                <div className="schema-edit-row">
+                  <button
+                    className="run-button"
+                    disabled={!canApplyAuthoringSchema}
+                    onClick={handleApplySchema}
+                  >
+                    Apply schema
+                  </button>
+                  {applySchemaHint && <span className="hint-text">{applySchemaHint}</span>}
+                </div>
+              )}
+            </>
           )}
         </section>
 
@@ -337,31 +751,33 @@ export function SqlPlaygroundImportApp({
           hidden={workspaceMode !== "query"}
           aria-hidden={workspaceMode !== "query"}
         >
-          {exercise && <PracticePromptCard exercise={exercise} />}
+          {exercise && exercise.mode !== "new-schema" && <PracticePromptCard exercise={exercise} />}
 
-          <div className="dataset-status-card">
-            <div>
-              <div className="dataset-status-kicker">Runnable snapshot</div>
-              <strong>
-                {hasBlockingDraftState
-                  ? "Draft needs attention before you can run SQL."
-                  : appliedQuestion
-                    ? "Dataset is current and ready to query."
-                    : "Load or import a dataset to start querying."}
-              </strong>
+          {showDatasetStatusCard && (
+            <div className="dataset-status-card">
+              <div>
+                <div className="dataset-status-kicker">Runnable snapshot</div>
+                <strong>
+                  {hasBlockingDraftState
+                    ? "Draft needs attention before you can run SQL."
+                    : appliedQuestion
+                      ? "Dataset is current and ready to query."
+                      : "Load or import a dataset to start querying."}
+                </strong>
+              </div>
+              <div className="dataset-source-row">
+                {hasGeneratedSampleRows && (
+                  <span className="dataset-generated-chip">Generated sample data</span>
+                )}
+                {exercise?.sourceLabel && (
+                  <span className="dataset-source-chip">{exercise.sourceLabel}</span>
+                )}
+              </div>
             </div>
-            <div className="dataset-source-row">
-              {hasGeneratedSampleRows && (
-                <span className="dataset-generated-chip">Generated sample data</span>
-              )}
-              {exercise?.sourceLabel && (
-                <span className="dataset-source-chip">{exercise.sourceLabel}</span>
-              )}
-            </div>
-          </div>
+          )}
 
           {hasBlockingDraftState && (
-            <p style={{ color: "#b00020", margin: "0 0 12px" }}>
+            <p className="error-text" style={{ margin: "0 0 12px" }}>
               {Object.keys(validationErrors).length > 0
                 ? "Draft has validation errors."
                 : "Draft updates are not runnable yet."}
@@ -383,7 +799,7 @@ export function SqlPlaygroundImportApp({
                     className="ghost-action"
                     onClick={() => setIsQuerySchemaVisible(true)}
                   >
-                    Show schema reference
+                    Show
                   </button>
                 </div>
               )}
@@ -392,7 +808,7 @@ export function SqlPlaygroundImportApp({
                 initialQuery={readOnlyImport ? "" : initialQuery}
                 solutionQuery={readOnlyImport ? initialQuery : undefined}
                 createRunner={createRunner}
-                title="Workbench"
+                title="SQL"
                 runDisabled={hasBlockingDraftState}
               />
             </div>
@@ -404,6 +820,22 @@ export function SqlPlaygroundImportApp({
         </section>
       </div>
     </>
+  );
+}
+
+function NewSchemaPlaceholderCard() {
+  return (
+    <section className="prompt-card">
+      <div className="prompt-card-header">
+        <div>
+          <div className="prompt-kicker">Use your own schema</div>
+          <h3>Start from a blank schema</h3>
+        </div>
+      </div>
+      <p className="prompt-summary">
+        Add tables and columns here, then apply the schema to generate sample rows and start querying.
+      </p>
+    </section>
   );
 }
 
@@ -428,7 +860,7 @@ function PromptCard({
   prompt,
 }: {
   exercise: ExerciseDefinition;
-  prompt: string;
+  prompt?: string;
 }) {
   return (
     <section className="prompt-card">
@@ -446,9 +878,11 @@ function PromptCard({
         </div>
       </div>
       <p className="prompt-summary">{exercise.summary}</p>
-      <div className="prompt-text-block">
-        <pre>{prompt}</pre>
-      </div>
+      {prompt ? (
+        <div className="prompt-text-block">
+          <pre>{prompt}</pre>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -471,6 +905,7 @@ function QuerySchemaReference({
   onCollapse: () => void;
 }) {
   const joinHintsByTable = inferJoinHintsByTable(question);
+  const explicitReferenceLabelsByTable = inferExplicitReferenceLabelsByTable(question);
 
   return (
     <aside className="query-schema-rail" aria-label="Schema reference">
@@ -480,7 +915,7 @@ function QuerySchemaReference({
           <h3>Schema reference</h3>
         </div>
         <button className="ghost-action" onClick={onCollapse}>
-          Hide schema reference
+          Hide
         </button>
       </div>
       <div className="query-schema-table-list">
@@ -497,10 +932,24 @@ function QuerySchemaReference({
                 joins on: {joinHintsByTable[tableIndex].join(", ")}
               </div>
             )}
+            {explicitReferenceLabelsByTable[tableIndex]?.length > 0 && (
+              <ul className="table-reference-list" aria-label={`${table.name} references`}>
+                {explicitReferenceLabelsByTable[tableIndex].map((label) => (
+                  <li key={label}>{label}</li>
+                ))}
+              </ul>
+            )}
             <ul className="query-schema-column-list">
               {table.columns.map((column) => (
                 <li key={`${table.name}-${column.name}`}>
-                  <span>{column.name}</span>
+                  <div className="query-schema-column-copy">
+                    <span>{column.name}</span>
+                    {column.references && (
+                      <span className="query-schema-column-reference">
+                        references {formatReferenceTarget(column.references)}
+                      </span>
+                    )}
+                  </div>
                   <span className="query-schema-column-type">{column.type}</span>
                 </li>
               ))}
@@ -526,7 +975,7 @@ export function SqlPlaygroundApp({
   initialQuery,
   solutionQuery,
   createRunner,
-  title = "Phase 2: editable DoorDash query",
+  title = "SQL",
   runDisabled = false,
 }: SqlPlaygroundAppProps) {
   const [status, setStatus] = useState<Status>("loading");
@@ -535,6 +984,7 @@ export function SqlPlaygroundApp({
   const [bootError, setBootError] = useState<string | null>(null);
   const [query, setQuery] = useState(initialQuery);
   const [runner, setRunner] = useState<Runner | null>(null);
+  const [isRevealConfirming, setIsRevealConfirming] = useState(false);
   const loadedTableNamesRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -594,10 +1044,13 @@ export function SqlPlaygroundApp({
     };
   }, [initialQuery, question, runner]);
 
+  const hasUnsavedQuery = query.trim().length > 0 && query !== solutionQuery;
+
   async function handleRun() {
     if (!runner) return;
     const next = await runner.runQuery(query);
     setAnswerFeedback(null);
+    setIsRevealConfirming(false);
     setResult(next);
   }
 
@@ -624,6 +1077,23 @@ export function SqlPlaygroundApp({
     );
   }
 
+  function handleRevealSolution() {
+    if (!solutionQuery) return;
+    if (hasUnsavedQuery) {
+      setIsRevealConfirming(true);
+      return;
+    }
+
+    setIsRevealConfirming(false);
+    setQuery(solutionQuery);
+  }
+
+  function confirmRevealSolution() {
+    if (!solutionQuery) return;
+    setQuery(solutionQuery);
+    setIsRevealConfirming(false);
+  }
+
   return (
     <div className="workbench-panel">
       <div className="workbench-panel-header">
@@ -639,13 +1109,33 @@ export function SqlPlaygroundApp({
       </button>
       {solutionQuery && (
         <div className="practice-action-row">
-          <button
-            className="ghost-action"
-            disabled={status !== "ready" || runDisabled}
-            onClick={() => setQuery(solutionQuery)}
-          >
-            Reveal solution
-          </button>
+          {isRevealConfirming ? (
+            <div className="inline-confirm-row">
+              <span className="inline-confirm-copy">Replace your current query?</span>
+              <button
+                className="ghost-action"
+                disabled={status !== "ready" || runDisabled}
+                onClick={confirmRevealSolution}
+              >
+                Yes, reveal
+              </button>
+              <button
+                className="ghost-action"
+                disabled={status !== "ready" || runDisabled}
+                onClick={() => setIsRevealConfirming(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              className="ghost-action"
+              disabled={status !== "ready" || runDisabled}
+              onClick={handleRevealSolution}
+            >
+              Reveal solution
+            </button>
+          )}
           <button
             className="ghost-action"
             disabled={status !== "ready" || runDisabled}
@@ -657,9 +1147,7 @@ export function SqlPlaygroundApp({
       )}
       {answerFeedback && <p className="answer-feedback">{answerFeedback}</p>}
       {status === "loading" && <p>Booting DuckDB…</p>}
-      {status === "error" && (
-        <pre style={{ color: "#b00020", whiteSpace: "pre-wrap" }}>{bootError}</pre>
-      )}
+      {status === "error" && <pre className="error-text error-block">{bootError}</pre>}
       {status === "ready" && result && <ResultView result={result} />}
     </div>
   );
@@ -675,9 +1163,9 @@ function ImportPanel({ value, onChange, onImport }: ImportPanelProps) {
   return (
     <section className="import-card">
       <div className="prompt-kicker">Custom Import</div>
-      <h3>Paste a prompt</h3>
+      <h3>Paste your schema</h3>
       <p className="prompt-summary">
-        Drop in a DataLemur-style schema block, inspect the parsed tables, then query it.
+        Paste a CREATE TABLE block or schema description, inspect the parsed tables, then query it.
       </p>
       <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }} htmlFor="import-prompt">
         Import prompt
@@ -698,8 +1186,10 @@ function ImportPanel({ value, onChange, onImport }: ImportPanelProps) {
 }
 
 interface QuestionPreviewProps {
+  heading?: string;
   question: QuestionModel;
   editable?: boolean;
+  canManageStructure?: boolean;
   validationErrors?: ValidationErrorMap;
   onTableNameChange?: (tableIndex: number, value: string) => void;
   onColumnNameChange?: (
@@ -712,27 +1202,63 @@ interface QuestionPreviewProps {
     columnIndex: number,
     value: ColumnType,
   ) => void;
+  onAddTable?: () => void;
+  onRemoveTable?: (tableIndex: number) => void;
+  onAddColumn?: (tableIndex: number) => void;
+  onRemoveColumn?: (tableIndex: number, columnIndex: number) => void;
+  onColumnReferenceChange?: (
+    tableIndex: number,
+    columnIndex: number,
+    value: ColumnReference | undefined,
+  ) => void;
 }
 
 function QuestionPreview({
+  heading = "Tables",
   question,
   editable = false,
+  canManageStructure = false,
   validationErrors = {},
   onTableNameChange,
   onColumnNameChange,
   onColumnTypeChange,
+  onAddTable,
+  onRemoveTable,
+  onAddColumn,
+  onRemoveColumn,
+  onColumnReferenceChange,
 }: QuestionPreviewProps) {
   const joinHintsByTable = inferJoinHintsByTable(question);
+  const explicitReferenceLabelsByTable = inferExplicitReferenceLabelsByTable(question);
 
   return (
     <section className="evidence-panel">
-      <h2>Imported tables</h2>
+      <h2>{heading}</h2>
+      {canManageStructure && (
+        <div className="schema-edit-row">
+          <button className="ghost-action" onClick={onAddTable}>
+            Add table
+          </button>
+        </div>
+      )}
+      {canManageStructure && question.tables.length === 0 && (
+        <p className="prompt-summary">No tables yet. Add one to start shaping the schema.</p>
+      )}
       {question.tables.map((table, tableIndex) => (
         <article key={tableIndex} style={{ marginBottom: 16 }}>
           <div className="table-heading-row">
             <label style={{ display: "block", fontSize: 12, color: "#666", flex: 1 }}>
               Table name
             </label>
+            {canManageStructure && (
+              <button
+                className="ghost-action"
+                type="button"
+                onClick={() => onRemoveTable?.(tableIndex)}
+              >
+                Remove table
+              </button>
+            )}
             {table.sampleRowsMode === "generated" && (
               <span className="generated-row-chip">Generated sample data</span>
             )}
@@ -751,6 +1277,13 @@ function QuestionPreview({
               <div className="table-join-hint">
                 joins on: {joinHintsByTable[tableIndex].join(", ")}
               </div>
+            )}
+            {explicitReferenceLabelsByTable[tableIndex]?.length > 0 && (
+              <ul className="table-reference-list" aria-label={`${table.name} references`}>
+                {explicitReferenceLabelsByTable[tableIndex].map((label) => (
+                  <li key={label}>{label}</li>
+                ))}
+              </ul>
             )}
             {validationErrors[makeTableNameKey(tableIndex)] && (
               <div style={{ color: "#b00020", fontSize: 12 }}>
@@ -794,6 +1327,56 @@ function QuestionPreview({
                             ))}
                           </select>
                         </div>
+                        {canManageStructure && (
+                          <div style={{ marginTop: 4 }}>
+                            <select
+                              aria-label={`${table.name} column ${columnIndex + 1} reference`}
+                              value={
+                                column.references
+                                  ? JSON.stringify([
+                                      column.references.table,
+                                      column.references.column,
+                                    ])
+                                  : ""
+                              }
+                              onChange={(event) =>
+                                onColumnReferenceChange?.(
+                                  tableIndex,
+                                  columnIndex,
+                                  event.target.value
+                                    ? (() => {
+                                        const [referenceTable, referenceColumn] = JSON.parse(
+                                          event.target.value,
+                                        ) as [string, string];
+                                        return {
+                                          table: referenceTable,
+                                          column: referenceColumn,
+                                        };
+                                      })()
+                                    : undefined,
+                                )
+                              }
+                            >
+                              <option value="">No reference</option>
+                              {listReferenceTargets(question, tableIndex, columnIndex).map((target) => (
+                                <option key={target.value} value={target.value}>
+                                  {target.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {canManageStructure && (
+                          <div style={{ marginTop: 6 }}>
+                            <button
+                              className="ghost-action"
+                              type="button"
+                              onClick={() => onRemoveColumn?.(tableIndex, columnIndex)}
+                            >
+                              Remove column
+                            </button>
+                          </div>
+                        )}
                       </>
                     ) : (
                       <>
@@ -804,6 +1387,11 @@ function QuestionPreview({
                     {validationErrors[makeColumnNameKey(tableIndex, columnIndex)] && (
                       <div style={{ color: "#b00020", fontSize: 12 }}>
                         {validationErrors[makeColumnNameKey(tableIndex, columnIndex)]}
+                      </div>
+                    )}
+                    {validationErrors[makeColumnReferenceKey(tableIndex, columnIndex)] && (
+                      <div style={{ color: "#b00020", fontSize: 12 }}>
+                        {validationErrors[makeColumnReferenceKey(tableIndex, columnIndex)]}
                       </div>
                     )}
                   </th>
@@ -841,6 +1429,17 @@ function QuestionPreview({
               ))}
             </tbody>
           </table>
+          {canManageStructure && (
+            <div className="schema-edit-row">
+              <button
+                className="ghost-action"
+                type="button"
+                onClick={() => onAddColumn?.(tableIndex)}
+              >
+                Add column to {table.name}
+              </button>
+            </div>
+          )}
         </article>
       ))}
     </section>
@@ -863,6 +1462,10 @@ function evaluateDraftQuestion(draftQuestion: QuestionModel): {
       validationErrors[makeTableNameKey(tableIndex)] = "Table names must be unique";
     }
 
+    if (table.columns.length === 0) {
+      validationErrors[makeTableColumnsKey(tableIndex)] = "Add at least one column";
+    }
+
     const duplicateColumnNameCounts = countTrimmedNames(
       table.columns.map((column) => column.name),
     );
@@ -874,6 +1477,22 @@ function evaluateDraftQuestion(draftQuestion: QuestionModel): {
       } else if ((duplicateColumnNameCounts.get(column.name.trim()) ?? 0) > 1) {
         validationErrors[makeColumnNameKey(tableIndex, columnIndex)] =
           "Column names must be unique";
+      }
+
+      if (column.references) {
+        const referencedLocation = findReferencedColumn(draftQuestion, column.references);
+        if (!referencedLocation) {
+          validationErrors[makeColumnReferenceKey(tableIndex, columnIndex)] =
+            "Reference target is missing";
+        } else {
+          const referencedColumn =
+            draftQuestion.tables[referencedLocation.tableIndex].columns[referencedLocation.columnIndex];
+
+          if (referencedColumn.type !== column.type) {
+            validationErrors[makeColumnReferenceKey(tableIndex, columnIndex)] =
+              "Reference type must match target column type";
+          }
+        }
       }
     });
 
@@ -911,6 +1530,12 @@ function evaluateDraftQuestion(draftQuestion: QuestionModel): {
         columns: table.columns.map((column) => ({
           ...column,
           name: column.name.trim(),
+          references: column.references
+            ? {
+                table: column.references.table.trim(),
+                column: column.references.column.trim(),
+              }
+            : undefined,
         })),
         rows: table.rows.map((row, rowIndex) =>
           row.map((cell, cellIndex) => {
@@ -978,6 +1603,41 @@ function countTrimmedNames(names: string[]): Map<string, number> {
   return counts;
 }
 
+function listReferenceTargets(
+  question: QuestionModel,
+  sourceTableIndex: number,
+  _sourceColumnIndex: number,
+): Array<{ label: string; value: string }> {
+  return question.tables.flatMap((table, tableIndex) =>
+    tableIndex === sourceTableIndex
+      ? []
+      : table.columns
+          .filter((column) => table.name.trim() !== "" && column.name.trim() !== "")
+          .map((column) => ({
+            label: `${table.name}.${column.name}`,
+            value: JSON.stringify([table.name, column.name]),
+          })),
+  );
+}
+
+function findReferencedColumn(
+  question: QuestionModel,
+  reference: ColumnReference,
+): { tableIndex: number; columnIndex: number } | null {
+  for (let tableIndex = 0; tableIndex < question.tables.length; tableIndex += 1) {
+    const table = question.tables[tableIndex];
+    if (table.name.trim() !== reference.table.trim()) continue;
+
+    for (let columnIndex = 0; columnIndex < table.columns.length; columnIndex += 1) {
+      if (table.columns[columnIndex].name.trim() === reference.column.trim()) {
+        return { tableIndex, columnIndex };
+      }
+    }
+  }
+
+  return null;
+}
+
 function coerceEditedValue(type: ColumnType, value: string): CellValue {
   const trimmed = value.trim();
   if (trimmed === "-") return null;
@@ -1014,6 +1674,14 @@ function makeTableNameKey(tableIndex: number): string {
 
 function makeColumnNameKey(tableIndex: number, columnIndex: number): string {
   return `column:${tableIndex}:${columnIndex}:name`;
+}
+
+function makeColumnReferenceKey(tableIndex: number, columnIndex: number): string {
+  return `column:${tableIndex}:${columnIndex}:reference`;
+}
+
+function makeTableColumnsKey(tableIndex: number): string {
+  return `table:${tableIndex}:columns`;
 }
 
 function ResultView({ result }: { result: QueryResult }) {

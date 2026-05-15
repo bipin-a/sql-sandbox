@@ -4,7 +4,7 @@
 
 ## Architectural decisions
 
-Durable decisions that apply across Phase 1:
+Durable decisions that apply across all phases:
 
 - **Stack**: Vite + React + TypeScript. DuckDB-WASM for SQL execution. Monaco for the editor once the browser tracer is proven. No backend, no router, no persistence in v1.
 - **Canonical data shape**: every layer flows through a question model:
@@ -21,11 +21,14 @@ Durable decisions that apply across Phase 1:
   - later: `SchemaParser`, `QuestionModelNormalizer`, `QuestionEditor`, `SessionState`
 - **DB lifecycle**: each question/session owns its own temporary in-memory database. Resetting the session rebuilds the schema from scratch.
 - **Import/edit lifecycle**: raw pasted text is an import affordance only. After import, the structured question model shown in the editor becomes the source of truth for editing, while the SQL runtime uses the last valid applied dataset.
-- **Exercise navigation**: the app includes a small built-in exercise library plus a custom import entry. Switching exercises should feel instant and should privilege query-writing over library management.
+- **Exercise navigation**: the app includes a small curated practice set, not a growing catalog. Roughly 4-8 seeded exercises is enough. Switching exercises should feel instant and should privilege query-writing over library management.
 - **Schema-only editing**: sample rows are visible as mock evidence, but not directly editable. Users can correct table names, column names, and declared types; row values remain read-only in v1.
 - **Schema-only imports**: prompts without example rows should still become runnable through deterministic generated sample data. Built-in exercises keep curated rows when available.
-- **Generated data scope**: generated rows are per-column, simple, and deterministic. Do not infer cross-table foreign-key relationships, composite keys, or realistic business distributions in v1.
-- **Workspace modes**: the app uses plain Setup and Query modes rather than a permanent 50/50 split. Setup focuses on import/schema/sample data. Query gives the SQL workbench most of the screen. Built-ins default to Query; custom imports default to Setup.
+- **Generated data scope**: generated rows are simple and deterministic. Identical shared `*_id` alignment is in scope; relationship inference, composite keys, FK-to-PK guessing across different names, and realistic business distributions are not.
+- **Workspace modes**: the app uses plain Setup and Query modes rather than a permanent 50/50 split. Setup focuses on prompt/schema/sample data. Query gives the SQL workbench most of the screen. Built-ins open in Query with schema context visible there; custom imports and blank-schema authoring open in Setup.
+- **Entry paths**: the two top-level intents (`Practice with sample data`, `Use my own tables`) are the primary product choice and must be visible on first load. Superseded by Phase 16: the modal `Change source` affordance from Phase 15 hid the second intent from new users and is replaced by a home-screen chooser that the workspace returns to via a persistent `Home` link.
+- **Source chooser shape**: curated exercises live under `Practice with sample data`. `Import prompt/schema` and `Create schema` are sibling actions under `Use my own tables`. The chooser is the app's home surface (not a modal) and may leave space for future Recent/Saved sections, but v1 should not implement persistence.
+- **Dialect stance**: exercises carry a default SQL dialect, users may override it when they intentionally want to practice another flavor, and the runtime stays single-engine until multi-engine execution earns its cost.
 - **Run semantics**: query execution is explicit through `Run` or the keyboard shortcut. Dataset edits should not rerun the query on every keystroke.
 - **Testing stance for Phase 1**:
   - prefer pure unit tests where correctness risk is real
@@ -163,10 +166,10 @@ Built-in exercises should keep curated rows. Generation is a fallback for missin
 
 - [x] A schema-only prompt imports successfully without manual row entry.
 - [x] Generated rows are deterministic, type-correct, and visibly labeled as generated sample data.
-- [x] The generator defaults to 5 rows per table.
-- [x] The generator does not attempt cross-table key alignment or foreign-key inference.
+- [x] The generator defaults to 5 rows per table in this phase. Phase 6 later raises the current default to 12.
+- [x] The generator stays narrow: identical shared `*_id` alignment is allowed, but foreign-key inference and richer relationship modeling are absent.
 - [x] Built-in exercises preserve curated sample rows.
-- [x] Built-in exercises open in Query mode by default.
+- [x] Built-in exercises open in a query-focused workspace by default.
 - [x] Custom import opens in Setup mode by default.
 - [x] Query mode gives the SQL editor and result panel a materially larger portion of the workbench than the current split layout.
 - [x] Setup mode remains one click away without introducing a drawer in v1.
@@ -183,7 +186,7 @@ After Phase 4, the next work should focus on:
 - broader prompt-shape coverage against real DataLemur-style inputs
 - parser hardening for messier formatting and float-heavy examples
 - runtime polish for result shaping, especially typed numerics such as `DECIMAL`
-- expanding the exercise library while keeping schema-first import and query flows fast
+- keeping the curated exercise set small while improving schema-first import and query flows
 
 ---
 
@@ -279,7 +282,7 @@ This phase should improve the breadth of realistic practice content while keepin
 
 - **More curated exercises**: add several new seeded problems with curated prompts, schema, mock rows, and starter queries.
 - **Exercise variety**: broaden coverage across joins, grouping, window functions, date arithmetic, filtering, and ranking.
-- **Library polish**: keep exercise summaries, theme tags, and difficulty labels consistent so the left rail remains easy to scan.
+- **Library polish**: keep exercise summaries, theme tags, and difficulty labels consistent so the practice picker remains easy to scan.
 - **Generator non-goal**: do not expand semantic generation or relationship inference as part of this phase. New exercises should pressure-test the current implementation, not widen it speculatively.
 
 ### TDD sequence
@@ -367,7 +370,7 @@ Keep Query as the main workspace, but stop making it feel blind. Users should be
 This phase should improve orientation and reference access rather than add new SQL features:
 
 - **Query-side schema rail**: add a compact schema sidebar or reference panel inside Query mode that shows table names, columns, types, and join hints.
-- **Orientation-first seeded flow**: stop defaulting seeded exercises into isolated querying with no context. Seeded cases should either open in Setup first or show equivalent schema context immediately in Query.
+- **Orientation-aware seeded flow**: keep seeded exercises query-first, but never blind. Schema context should already be visible when the user lands in the practice workspace.
 - **Compact reference behavior**: schema context should be collapsible or visually secondary so the editor still owns the main canvas.
 - **Mode split reassessment**: evaluate whether Setup/Query should remain separate modes once Query includes enough reference context.
 
@@ -396,44 +399,356 @@ This phase should improve orientation and reference access rather than add new S
 - New generator controls or richer mock-data realism
 - Persistence or progress tracking
 
-## Phase 10: Dialect-aware practice
+## Phase 10: Seeded Setup cleanup
 
-**User stories**: PRD 1, 2, 3, 4, 8, 10, 11, 17, 20, 22
+**User stories**: PRD 14, 15, 23, 24, 31
+
+**Status**: complete
+
+### What to build
+
+Remove the remaining parser-shaped UI from curated practice. Seeded Setup should feel like reference context, not import tooling.
+
+This phase is intentionally tiny and independently shippable:
+
+- **No raw source panel on seeded Setup**: hide import-style text for built-in exercises by default.
+- **Two-surface contract for now**: keep the raw text panel only on Custom Import and remove it from seeded exercises. Blank-schema authoring will inherit the no-raw-text rule in Phase 13.
+- **Structured-first orientation**: let seeded Setup focus on problem statement, schema, rows, and relationship hints.
+
+### TDD sequence
+
+1. [x] RED: seeded Setup still exposes raw import-style source text.
+2. [x] GREEN: render seeded Setup with structured reference only, no raw text panel.
+3. [x] RED: the change could accidentally remove the import panel from Custom Import.
+4. [x] GREEN: codify the two-surface contract in tests: seeded has no import panel, custom import does.
+
+### Acceptance criteria
+
+- [x] Seeded Setup no longer shows raw import-style source text by default.
+- [x] Custom Import still shows the raw text import surface.
+- [x] The resulting Setup surface feels quieter and more practice-oriented.
+
+### Out Of Scope For Phase 10
+
+- Manual schema authoring controls
+- Dialect selection or runtime behavior
+- AI hints or tutoring
+
+## Phase 11: Custom import output-block hardening
+
+**User stories**: PRD 1, 4, 8, 19, 35
+
+**Status**: complete
+
+### What to build
+
+Harden the parser for the most common pasted tutorial shape before making Custom Import more prominent in the IA.
+
+This phase should stay small and contained:
+
+- **Ignore output examples safely**: when a pasted prompt includes `Example Output:`, the parser should stop treating those lines as input rows.
+- **Preserve current import contract**: schema plus `Example Input:` should continue to parse exactly as before.
+- **Do not broaden answer-checking yet**: this phase is about safe import, not about turning output examples into expected-result data.
+
+### TDD sequence
+
+1. [x] RED: a prompt with `Example Input:` followed by `Example Output:` pollutes imported table rows.
+2. [x] GREEN: stop row parsing at `Example Output:` and ignore the output block safely.
+3. [x] RED: the hardening could accidentally break schema-only or example-input-only imports.
+4. [x] GREEN: preserve the existing import contracts in tests.
+
+### Acceptance criteria
+
+- [x] `Example Output:` blocks no longer create bogus imported rows.
+- [x] Existing schema-only and example-input import paths continue to pass unchanged.
+- [x] The parser contract remains narrow: `Example Output:` is ignored, not yet parsed into expected-result data.
+
+### Out Of Scope For Phase 11
+
+- Parsing output examples into answer-checking data before custom-import answer checking needs expected-result data
+- Navigation or rail changes
+- Blank-schema authoring
+
+## Phase 12: Two-source rail navigation
+
+**User stories**: PRD 10, 14, 15, 23, 24, 31, 35
+
+**Status**: complete; superseded by Phase 15 for primary navigation
+
+### What to build
+
+Reshape the rail so the product reads as two source groups, not as a flat list of exercises plus tools.
+
+Historical note: this phase improved the tracer-era rail, but later product review found that a permanent rail still made the app feel like a catalog. Phase 15 replaces this with a workspace-first source chooser.
+
+- **Practice group**: keep a small curated seeded set visible.
+- **Use your own schema group**: place `Custom Import` and `New schema` together as sibling entries.
+- **Shared workspace shell**: keep the current query workspace and schema-context behavior, but make entry-path differences legible through grouping.
+
+### TDD sequence
+
+1. [x] RED: the rail currently presents seeded exercises and import tooling as one flat list.
+2. [x] GREEN: group the rail into `Practice` and `Use your own schema`.
+3. [x] RED: regrouping the rail could break seeded query-first behavior or hide Custom Import.
+4. [x] GREEN: preserve seeded query-first flow and explicit Custom Import access in tests.
+
+### Acceptance criteria
+
+- [x] The rail exposes `Practice` and `Use your own schema` as the two top-level source groups.
+- [x] Curated exercises remain easy to start from and continue to open query-first.
+- [x] `Custom Import` and `New schema` appear as distinct sibling entries under `Use your own schema`.
+- [x] The resulting navigation feels cleaner without making the rail feel smaller or secondary.
+
+### Out Of Scope For Phase 12
+
+- Changing the query workspace itself
+- Blank-schema authoring controls
+- Dialect UX
+- AI help
+
+## Phase 13: New schema MVP
+
+**User stories**: PRD 3, 6, 10, 12, 13, 15, 17, 20, 27, 28, 30
+
+**Status**: complete
+
+### What to build
+
+Add the `New schema` path under the bring-your-own-tables flow: start from nothing, design a simple schema, and query it immediately.
+
+This phase should make authoring possible without turning the app into a spreadsheet:
+
+- **New schema entry point**: add a distinct blank-schema entry under the bring-your-own-tables flow, beside `Custom Import`.
+- **Table authoring**: support adding and removing tables from scratch.
+- **Column authoring**: support adding and removing columns with editable names and types.
+- **Generated rows only**: authored schemas should get deterministic generated sample rows through the existing mock-data path.
+  The first version may produce type-correct but domain-generic values.
+- **No row editing**: keep data-entry concerns out of the authoring surface.
+
+### TDD sequence
+
+1. [x] RED: there is no first-class way to begin with a blank schema.
+2. [x] GREEN: add a `New schema` entry point that initializes an empty authoring session in Setup mode.
+3. [x] RED: authored schemas cannot add or remove tables.
+4. [x] GREEN: support add/remove table actions and keep the structured draft valid.
+5. [x] RED: authored tables cannot add or remove columns from scratch.
+6. [x] GREEN: support add/remove column actions with name/type editing.
+7. [x] RED: authored schemas still require manual row entry before they can be queried.
+8. [x] GREEN: run authored schemas through deterministic sample-row generation and the existing Query flow.
+
+### Acceptance criteria
+
+- [x] The app offers a visible blank-schema entry point.
+- [x] Users can add and remove tables without pasting raw prompt text.
+- [x] Users can add and remove columns and edit their names and types.
+- [x] Authored schemas become runnable through generated sample rows.
+- [x] The authoring surface remains schema-focused; manual row editing is still absent.
+
+### Out Of Scope For Phase 13
+
+- Explicit relationship declarations
+- LLM-generated schemas
+- LLM-generated sample rows
+- Schema critique or tutoring
+- Per-column semantic hint controls
+- Spreadsheet-style row editing
+- Rich ER diagrams or auto-layout visualizations
+
+## Phase 14: Explicit relationships
+
+**User stories**: PRD 6, 10, 29, 30
+
+**Status**: complete
+
+### What to build
+
+Add simple relationship declaration on top of blank-schema authoring so joins become explicit, not only inferred.
+
+- **Column-level references**: use metadata such as `references?: { table: string; column: string }`, not a separate top-level relationship graph.
+- **Relationship UI**: allow users to declare simple `table.column -> table.column` references while editing a schema.
+- **Reference visibility**: surface both quiet join hints and explicit reference labels in structured Setup and query-side schema context.
+- **Generated-key alignment**: when a relationship is explicit, ensure referenced IDs exist in generated sample rows.
+
+### TDD sequence
+
+1. [x] RED: joins in authored schemas rely only on implicit `*_id` matching.
+2. [x] GREEN: allow simple explicit relationship declarations on columns.
+3. [x] RED: explicit relationships are not visible in the structured reference surfaces.
+4. [x] GREEN: render both text hints and explicit reference labels where users inspect schema context.
+5. [x] RED: explicit references do not affect generated sample rows at all.
+6. [x] GREEN: ensure generated child IDs map to existing referenced parent IDs.
+
+### Acceptance criteria
+
+- [x] Users can declare simple explicit column references.
+- [x] Authored schemas show both join hints and explicit relationship labels.
+- [x] Generated sample rows respect explicit reference targets at the ID-existence level.
+- [x] The relationship model stays simple and column-scoped.
+
+### Out Of Scope For Phase 14
+
+- Relationship type diagrams or auto-layout visualizations
+- Composite keys
+- FK-to-PK guessing across different names
+- Rich distribution modeling
+
+## Phase 15: Source chooser IA inversion
+
+**User stories**: PRD 10, 14, 15, 23, 24, 31, 35
+
+**Status**: complete; superseded by Phase 16 for first-run discoverability. The workspace-first inversion was correct, but hiding both intents behind a single `Change source` button meant new users never discovered `Use my own tables`. Phase 16 replaces the modal chooser with a landing screen.
+
+### What to build
+
+Invert the navigation so the SQL workspace is the permanent surface and source choice appears only when the user needs to change what they are working on.
+
+Phase 12 created the right conceptual grouping, but the live UI still uses a permanent side rail. That keeps the product feeling like a catalog. This phase should remove the rail as the primary navigation surface:
+
+- **Current source header**: show the loaded source in the workspace header, such as an exercise title, imported table summary, or new schema summary.
+- **Change source overlay**: use a single `Change source` affordance that opens a centered chooser.
+- **Two user intents**: chooser presents `Practice with sample data` and `Use my own tables`, not internal modes.
+- **Own-table actions**: under `Use my own tables`, expose `Import prompt/schema` and `Create schema`.
+- **Curated practice list**: show seeded exercises inside the chooser, not as an always-visible rail.
+- **Future extension slot**: leave room for future Recent/Saved sections in the chooser layout, but do not implement persistence in this phase.
+- **Safe custom reset**: avoid silently discarding pasted or authored schema content through the generic `Reset case` action.
+
+### TDD sequence
+
+1. [x] RED: the main app renders a permanent exercise/source rail beside the workspace.
+2. [x] GREEN: replace the permanent rail with a workspace header that shows current source plus `Change source`.
+3. [x] RED: a user cannot choose between `Practice with sample data` and `Use my own tables` from a single obvious source surface.
+4. [x] GREEN: add a centered source chooser overlay with those two intent groups.
+5. [x] RED: seeded exercises are unavailable without the old rail.
+6. [x] GREEN: list curated practice exercises inside the chooser and preserve seeded query-first behavior.
+7. [x] RED: import and blank-schema entry points still look like practice exercises or are buried in the chooser.
+8. [x] GREEN: show `Import prompt/schema` and `Create schema` as distinct own-table actions and preserve setup-first behavior.
+9. [x] RED: custom-flow reset can discard user-provided schema content with no warning.
+10. [x] GREEN: rename or confirm destructive reset behavior for custom flows while keeping seeded reset lightweight.
+11. [x] Browser smoke: first-load workspace reads as SQL workbench; `Change source` opens both intents; Custom Import remains setup-first; New Schema remains setup-first; seeded practice remains query-first.
+
+### Acceptance criteria
+
+- [x] The permanent side rail is gone from the normal workspace.
+- [x] The workspace header clearly states the current source and offers `Change source`.
+- [x] The chooser presents `Practice with sample data` and `Use my own tables` as the two source intents.
+- [x] `Import prompt/schema` and `Create schema` are visually distinct from curated practice exercises.
+- [x] Practice remains fast to start and does not require a separate landing page.
+- [x] Custom Import and New Schema remain setup-first.
+- [x] Seeded exercises remain query-first.
+- [x] Reset behavior is safe for user-provided schema content.
+
+### Out Of Scope For Phase 15
+
+- New parser capabilities
+- New schema-authoring field types
+- Dialect execution changes
+- Persistence or saved projects
+
+## Phase 16: Home-screen chooser + IA cleanup
+
+**User stories**: PRD 1, 10, 14, 15, 23, 24, 31, 35
+
+**Status**: complete
+
+### Why
+
+Phase 15 made the workspace permanent and hid the source chooser behind a `Change source` button. UX review on 2026-05-14 found that this design fails first-run discoverability: users are dropped into a default seeded exercise, never realize the second intent (`Use my own tables`) exists, and "Change source" reads as a settings affordance rather than the primary product choice. The fix is to make the two intents the landing surface and reach the workspace by selection, not by default.
+
+Phase 16 also cleans up leftover UX artifacts surfaced in the same review: dev-phase strings leaking into the workbench header, conditional copy that hides mode changes from the user, native `window.confirm` dialogs, and chrome that adds no value on the happy path.
+
+### What to build
+
+- **Home screen as landing surface**: first load renders a centered two-card chooser (`Practice with sample data`, `Use my own tables`) instead of dropping the user into a seeded exercise. It must not show the full seeded exercise catalog on first load. `Practice with sample data` starts a curated default; detailed exercise browsing is secondary and out of this slice.
+- **Return to home**: the workspace header replaces the `Change source` button with a `← Home` (or equivalent) link that returns to the chooser without forcing a modal.
+- **In-memory draft preservation**: returning Home preserves current Custom Import text and New Schema draft state in memory for the current session. Seeded practice returns Home immediately with no warning. Destructive reset remains separate.
+- **Conditional Setup/Query tabs**: hide the Setup/Query mode switch for seeded practice, where Setup adds no value. Keep the switch for Custom Import and New Schema where setup is a real phase.
+- **Remove leftover dev strings**: the workbench title `Phase 2: editable DoorDash query` and the `Casefile Desk` kicker should be removed or replaced with neutral copy.
+- **Safer `Reveal solution`**: confirm before overwriting a non-empty editor query so users do not lose in-progress work on a misclick.
+- **Inline reset confirmation**: replace `window.confirm` for destructive reset in custom flows with an inline confirmation pattern that does not jolt the user out of the app.
+- **Quieter dataset status**: hide the `Runnable snapshot / Dataset is current and ready to query` card on the happy path; surface it only when there is something actionable to say (draft errors, generated rows, etc.).
+- **Context-correct schema heading**: rename `Imported tables` in the structured preview so authored schemas no longer read as imported.
+- **Apply-button disabled hint**: when `Apply schema` is disabled in authoring, surface a brief reason inline (e.g. `2 issues to fix`) so users do not click into silence.
+
+### TDD sequence
+
+1. [x] RED: first load drops the user directly into a seeded exercise with no visible entry choice.
+2. [x] GREEN: first load renders a home-screen chooser with both intents visible; selecting an intent enters the workspace.
+3. [x] RED: there is no way back to the home chooser without using the modal.
+4. [x] GREEN: workspace header offers a `Home` link that returns to the chooser; remove the modal entry path.
+5. [x] RED: returning Home discards in-progress import text or authored schema work.
+6. [x] GREEN: preserve Custom Import and New Schema drafts in memory when returning Home; seeded practice returns Home immediately.
+7. [x] RED: seeded practice still renders the Setup/Query mode switch even though Setup adds no value there.
+8. [x] GREEN: gate the mode switch to flows where it is meaningful (Custom Import, New Schema).
+9. [x] RED: the workbench header still reads `Phase 2: editable DoorDash query`.
+10. [x] GREEN: replace dev-phase strings with neutral product copy.
+11. [x] RED: `Reveal solution` overwrites a non-empty editor query with no confirmation.
+12. [x] GREEN: confirm before destroying user-entered SQL.
+13. [x] RED: destructive reset for custom flows uses a native browser `confirm()` dialog.
+14. [x] GREEN: inline confirmation pattern replaces native dialogs.
+15. [x] RED: the dataset status card is always visible even when it has nothing useful to say.
+16. [x] GREEN: hide the card on the happy path; show it only when state is interesting.
+17. [x] RED: the structured preview heading reads `Imported tables` for authored schemas.
+18. [x] GREEN: heading reflects whether the schema was imported or authored.
+19. [x] Browser smoke: first load shows the chooser; `Practice` enters a query-first workspace with no Setup tab; `Home` returns to the chooser; `Use my own tables → Import` enters Setup-first; `Use my own tables → Create` enters Setup-first.
+
+### Acceptance criteria
+
+- [x] First load shows a home chooser with both intents visible; the workspace is never the initial surface.
+- [x] The home chooser does not show the full seeded exercise catalog.
+- [x] Both intents (`Practice with sample data`, `Use my own tables`) reach their respective flows from the chooser without traversing a modal.
+- [x] The workspace exposes a `Home` affordance that returns to the chooser.
+- [x] Returning Home preserves Custom Import and New Schema drafts in memory for the current session.
+- [x] Setup/Query mode switch is hidden where Setup has no purpose (seeded practice) and visible where Setup is a real phase (Custom Import, New Schema).
+- [x] No dev-phase or internal-codename strings appear in user-facing copy.
+- [x] `Reveal solution` confirms before overwriting non-empty queries.
+- [x] Destructive reset for custom flows uses inline confirmation rather than `window.confirm`.
+- [x] The dataset status card does not appear on the happy path and is reserved for actionable states.
+- [x] Structured-preview heading reflects whether the schema was imported or authored.
+- [x] Disabled `Apply schema` surfaces a short inline hint about what is blocking it.
+
+### Out Of Scope For Phase 16
+
+- New parser capabilities
+- Dialect work (owned by Phase 17)
+- Full exercise browser redesign
+- Persistence, Recent/Saved sections, or saved projects
+- Visual redesign beyond the IA changes listed above
+- AI hints or tutoring
+
+## Phase 17: Dialect-aware practice
+
+**User stories**: PRD 1, 2, 3, 4, 8, 10, 17, 20, 22, 33, 34
 
 **Status**: planned
 
 ### What to build
 
-Keep the runtime simple, but stop pretending SQL flavor differences do not matter.
-
-This phase should make dialect an explicit part of practice without turning the app into a true multi-engine product:
-
-- **Dialect metadata**: add a dialect profile to seeded exercises and imported prompts, such as `Postgres`, `Snowflake`, `BigQuery`, or `Generic SQL`.
+- **Default dialect metadata**: each exercise carries a default dialect, such as `Postgres`, `Snowflake`, or `Generic SQL`.
+- **User override**: users may override the active dialect across seeded, imported, or authored flows when they intentionally want to practice another flavor.
 - **Visible dialect chip**: show the active dialect near the problem brief and query workspace so users know what syntax expectations apply.
-- **Custom-import dialect choice**: let users choose a dialect when importing their own schema/problem so the app can frame the exercise correctly.
-- **Dialect-aware guidance**: surface quiet hints or warnings when the current dialect and the underlying runtime are likely to diverge on common syntax.
+- **Dialect-aware guidance**: surface quiet hints or warnings when the chosen dialect and the underlying runtime are likely to diverge on common syntax.
 - **Runtime simplicity**: keep DuckDB as the execution engine for now; do not introduce multiple SQL backends in this phase.
 
 ### TDD sequence
 
-1. [ ] RED: seeded exercises do not communicate which SQL dialect they represent.
-2. [ ] GREEN: add dialect metadata to the exercise model and render it in the UI.
-3. [ ] RED: custom imports implicitly behave like generic SQL with no user control.
-4. [ ] GREEN: add import-time dialect selection and carry it through the session state.
+1. [ ] RED: exercises and sessions do not communicate which SQL dialect they represent.
+2. [ ] GREEN: add default dialect metadata and render it in the UI.
+3. [ ] RED: users cannot intentionally practice a different dialect without switching exercises or inputs.
+4. [ ] GREEN: add a quiet dialect override control that works across seeded, import, and authoring flows.
 5. [ ] RED: users can write dialect-specific syntax with no guidance when DuckDB is likely to disagree.
-6. [ ] GREEN: surface narrow dialect-aware hints/warnings for the most common mismatches.
+6. [ ] GREEN: surface narrow dialect-aware hints or warnings for the most common mismatches.
 7. [ ] RED: dialect support is drifting toward a backend explosion rather than a practice aid.
 8. [ ] GREEN: codify single-runtime behavior in tests and docs.
 
 ### Acceptance criteria
 
-- [ ] Every seeded exercise exposes a visible dialect label.
-- [ ] Custom imports let the user pick a dialect without requiring engine setup.
+- [ ] Every exercise exposes a visible default dialect.
+- [ ] Users can override the active dialect when they intentionally want a different practice flavor.
 - [ ] The workspace can warn about common dialect/runtime mismatches without blocking query execution.
 - [ ] The app remains DuckDB-backed in this phase.
 - [ ] Dialect support improves learning context without turning the product into a configurable SQL IDE.
 
-### Out Of Scope For Phase 10
+### Out Of Scope For Phase 17
 
 - True multi-engine execution
 - Query transpilation across dialects

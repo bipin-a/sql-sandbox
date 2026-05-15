@@ -204,6 +204,30 @@ const curatedSeedExercise: ExerciseDefinition = {
   initialQuery: "SELECT COUNT(*) AS total FROM customers;",
 };
 
+const customImportExercise: ExerciseDefinition = {
+  id: "custom-import",
+  title: "Custom Import",
+  company: "Your Prompt",
+  difficulty: "Freeform",
+  themes: ["paste", "parse"],
+  summary: "Paste a schema or prompt to start querying your own dataset.",
+  prompt: "",
+  initialQuestion: null,
+  initialQuery: "-- Paste a prompt and import it to start querying.",
+  mode: "custom",
+};
+
+async function chooseSourceFromHome(name: string | RegExp) {
+  await userEvent.click(await screen.findByRole("button", { name }));
+}
+
+async function chooseNewSchemaSource() {
+  if (!screen.queryByLabelText("Home chooser")) {
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+  }
+  await chooseSourceFromHome(/Create schema/i);
+}
+
 describe("SqlPlaygroundApp", () => {
   it("imports pasted prompt text and shows a structured preview", async () => {
     const runner = makeRunner(async () => ({ columns: ["n"], rows: [[1]] }));
@@ -221,7 +245,7 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    const importedTablesHeading = await screen.findByRole("heading", { name: "Imported tables" });
+    const importedTablesHeading = await screen.findByRole("heading", { name: "Tables" });
     const previewPanel = importedTablesHeading.closest("section");
 
     expect(previewPanel).toBeTruthy();
@@ -245,7 +269,7 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    const importedTablesHeading = await screen.findByText("Imported tables");
+    const importedTablesHeading = await screen.findByRole("heading", { name: "Tables" });
     const previewPanel = importedTablesHeading.closest("section");
 
     expect(previewPanel).toBeTruthy();
@@ -267,7 +291,7 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await screen.findByText("Imported tables");
+    await screen.findByRole("heading", { name: "Tables" });
     await screen.findByText(/Row width mismatch in table "orders"/);
   });
 
@@ -302,8 +326,7 @@ describe("SqlPlaygroundApp", () => {
       />,
     );
 
-    await screen.findByText("Ada");
-    await userEvent.click(screen.getByRole("button", { name: "Query" }));
+    await screen.findByLabelText("SQL query");
 
     const editor = (await screen.findByLabelText("SQL query")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
@@ -324,13 +347,36 @@ describe("SqlPlaygroundApp", () => {
       />,
     );
 
-    await screen.findByText("Ada");
-    await userEvent.click(screen.getByRole("button", { name: "Query" }));
+    await screen.findByLabelText("SQL query");
 
     const editor = (await screen.findByLabelText("SQL query")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
 
     await userEvent.click(screen.getByRole("button", { name: "Reveal solution" }));
+
+    expect(editor.value).toBe("SELECT COUNT(*) AS total FROM customers;");
+  });
+
+  it("confirms before revealing a solution over a non-empty query", async () => {
+    const runner = makeRunner(async () => ({ columns: ["total"], rows: [[2]] }));
+
+    render(
+      <SqlPlaygroundApp
+        question={curatedSeedExercise.initialQuestion!}
+        initialQuery=""
+        solutionQuery="SELECT COUNT(*) AS total FROM customers;"
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    const editor = (await screen.findByLabelText("SQL query")) as HTMLTextAreaElement;
+    await userEvent.type(editor, "SELECT customer_name FROM customers;");
+    await userEvent.click(screen.getByRole("button", { name: "Reveal solution" }));
+
+    expect(screen.getByText("Replace your current query?")).toBeTruthy();
+    expect(editor.value).toBe("SELECT customer_name FROM customers;");
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes, reveal" }));
 
     expect(editor.value).toBe("SELECT COUNT(*) AS total FROM customers;");
   });
@@ -393,7 +439,7 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await screen.findByText("Imported tables");
+    await screen.findByRole("heading", { name: "Tables" });
     await screen.findByText("Draft has validation errors.");
     expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
     expect(runner.loadSchema).not.toHaveBeenCalled();
@@ -420,7 +466,7 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await screen.findByText("Imported tables");
+    await screen.findByRole("heading", { name: "Tables" });
     expect(screen.getAllByText("Generated sample data").length).toBeGreaterThan(0);
     expect(screen.getAllByText("processing").length).toBeGreaterThan(0);
     await screen.findByText("2024-01-01T09:00:00.000Z");
@@ -447,7 +493,7 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await screen.findByText("Imported tables");
+    await screen.findByRole("heading", { name: "Tables" });
     expect(screen.getByText("1")).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
     expect(screen.queryByLabelText("nums row 2 n")).toBeNull();
@@ -468,7 +514,7 @@ describe("SqlPlaygroundApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
 
-    await screen.findByText("Imported tables");
+    await screen.findByRole("heading", { name: "Tables" });
     expect(screen.queryByLabelText("Table 1 name")).toBeNull();
     expect(screen.queryByLabelText("nums column 1 name")).toBeNull();
 
@@ -690,70 +736,301 @@ describe("SqlPlaygroundApp", () => {
     expect(runner.loadSchema).toHaveBeenCalledTimes(1);
   });
 
-  it("switches between seeded exercises from the library rail", async () => {
-    let loadedSchemaSql = "";
+  it("starts practice from a two-option home chooser without showing the full catalog", async () => {
     const runner: Runner = {
-      loadSchema: vi.fn(async (sql: string) => {
-        loadedSchemaSql = sql;
-      }),
-      runQuery: vi.fn(async () => {
-        if (loadedSchemaSql.includes('CREATE OR REPLACE TABLE "nums" ("n" VARCHAR);')) {
-          return { columns: ["total"], rows: [[2]] };
-        }
-        return { columns: ["total"], rows: [[3]] };
-      }),
+      loadSchema: vi.fn(async () => {}),
+      runQuery: vi.fn(async () => ({ columns: ["total"], rows: [[3]] })),
       close: vi.fn(async () => {}),
     };
 
     render(
       <SqlPracticeStudio
         exercises={[exerciseOne, exerciseTwo]}
-        initialExerciseId="warmup-one"
         createRunner={vi.fn(async () => runner)}
       />,
     );
 
-    await screen.findByRole("button", { name: /Open Warm-up One/i });
+    expect(screen.getByLabelText("Home chooser")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Practice with sample data/i })).toBeTruthy();
+    expect(screen.getByLabelText("Use my own tables")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open Warm-up One/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Open Warm-up Two/i })).toBeNull();
+
+    await chooseSourceFromHome(/Practice with sample data/i);
+    expect(await screen.findByRole("button", { name: /Open Warm-up One/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Open Warm-up Two/i })).toBeTruthy();
+    await chooseSourceFromHome(/Open Warm-up One/i);
+
     await waitFor(() => {
       expect(runner.loadSchema).toHaveBeenLastCalledWith(
         expect.stringContaining('CREATE OR REPLACE TABLE "nums" ("n" INTEGER);'),
       );
     });
     expect(((await screen.findByLabelText("SQL query")) as HTMLTextAreaElement).value).toBe("");
-
-    await userEvent.click(screen.getByRole("button", { name: /Open Warm-up Two/i }));
-
-    await screen.findByRole("button", { name: /Open Warm-up Two/i });
-    await waitFor(() => {
-      expect(runner.loadSchema).toHaveBeenLastCalledWith(
-        expect.stringContaining('CREATE OR REPLACE TABLE "nums" ("n" VARCHAR);'),
-      );
-    });
-    expect(((await screen.findByLabelText("SQL query")) as HTMLTextAreaElement).value).toBe("");
   });
 
-  it("defaults seeded exercises to Setup mode and preserves curated sample rows", async () => {
+  it("uses a home chooser instead of a permanent rail, while preserving source-specific defaults", async () => {
     const runner = makeRunner(async () => ({ columns: ["total"], rows: [[2]] }));
 
     render(
       <SqlPracticeStudio
-        exercises={[curatedSeedExercise]}
-        initialExerciseId="curated-seed"
+        exercises={[curatedSeedExercise, customImportExercise]}
         createRunner={vi.fn(async () => runner)}
       />,
     );
 
-    await screen.findByText("Ada");
-    await screen.findByText("Linus");
+    expect(screen.queryByLabelText("Exercise library")).toBeNull();
+    expect(screen.getByLabelText("Home chooser")).toBeTruthy();
+    expect(screen.getByText("Practice with sample data")).toBeTruthy();
+    expect(screen.getByText("Use my own tables")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open Curated Seed/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Import prompt\/schema/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Create schema/i })).toBeTruthy();
+
+    await chooseSourceFromHome(/Practice with sample data/i);
+    await chooseSourceFromHome(/Open Curated Seed/i);
+    await screen.findByLabelText("SQL query");
+    expect(screen.queryByRole("button", { name: "Setup" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Query" })).toBeNull();
+    expect(screen.queryByLabelText("Import prompt")).toBeNull();
+    expect(screen.getByRole("button", { name: "Home" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+    await chooseSourceFromHome(/Import prompt\/schema/i);
     expect(screen.getByRole("button", { name: "Setup" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
     expect(screen.getByRole("button", { name: "Query" }).getAttribute("aria-pressed")).toBe(
       "false",
     );
-    expect(screen.queryByText("Generated sample data")).toBeNull();
-    expect(screen.queryByLabelText("Table 1 name")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit schema" })).toBeNull();
+    expect(await screen.findByLabelText("Import prompt")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+    await chooseSourceFromHome(/Create schema/i);
+    expect(screen.getByRole("button", { name: "Setup" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Query" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(await screen.findByText("Start from a blank schema")).toBeTruthy();
+    expect(screen.queryByLabelText("Import prompt")).toBeNull();
+  });
+
+  it("lets New Schema start blank, add structure, and apply generated sample rows", async () => {
+    const runner = makeRunner(async (sql) => {
+      if (sql.includes("COUNT")) {
+        return { columns: ["total"], rows: [[12]] };
+      }
+      return { columns: ["id"], rows: [[1]] };
+    });
+
+    render(
+      <SqlPracticeStudio
+        exercises={[curatedSeedExercise, customImportExercise]}
+        initialExerciseId="curated-seed"
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    await chooseNewSchemaSource();
+
+    expect(screen.getByText("Start from a blank schema")).toBeTruthy();
+    expect(screen.queryByLabelText("Import prompt")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add table" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Add table" }));
+
+    const tableNameInput = (await screen.findByLabelText("Table 1 name")) as HTMLInputElement;
+    expect(tableNameInput.value).toBe("table_1");
+    expect(screen.getByRole("button", { name: "Add column to table_1" })).toBeTruthy();
+
+    const columnNameInput = (await screen.findByLabelText(
+      "table_1 column 1 name",
+    )) as HTMLInputElement;
+
+    await userEvent.clear(tableNameInput);
+    await userEvent.type(tableNameInput, "orders");
+    await userEvent.clear(columnNameInput);
+    await userEvent.type(columnNameInput, "order_id");
+
+    expect(screen.getByRole("button", { name: "Add column to orders" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Add column to orders" }));
+
+    const secondColumnNameInput = (await screen.findByLabelText(
+      "orders column 2 name",
+    )) as HTMLInputElement;
+    await userEvent.clear(secondColumnNameInput);
+    await userEvent.type(secondColumnNameInput, "status");
+
+    const secondTypeSelect = screen.getByLabelText(
+      "orders column status type",
+    ) as HTMLSelectElement;
+    await userEvent.selectOptions(secondTypeSelect, "string");
+
+    await userEvent.click(screen.getByRole("button", { name: "Apply schema" }));
+    await userEvent.click(screen.getByRole("button", { name: "Query" }));
+
+    expect((await screen.findAllByText("Generated sample data")).length).toBeGreaterThan(0);
+    const editor = (await screen.findByLabelText("SQL query")) as HTMLTextAreaElement;
+    await userEvent.clear(editor);
+    await userEvent.type(editor, "SELECT COUNT(*) AS total FROM orders;");
+    await userEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("12");
+  });
+
+  it("keeps New Schema schema-focused while allowing structure removal", async () => {
+    const runner = makeRunner(async () => ({ columns: ["id"], rows: [[1]] }));
+
+    render(
+      <SqlPracticeStudio
+        exercises={[curatedSeedExercise, customImportExercise]}
+        initialExerciseId="curated-seed"
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    await chooseNewSchemaSource();
+
+    expect(screen.queryByRole("button", { name: /Add row/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remove row/i })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Add table" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add column to table_1" }));
+
+    expect(await screen.findByLabelText("table_1 column 2 name")).toBeTruthy();
+    await userEvent.click(screen.getAllByRole("button", { name: "Remove column" })[1]);
+    await waitFor(() => {
+      expect(screen.queryByLabelText("table_1 column 2 name")).toBeNull();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove table" }));
+    await screen.findByText("No tables yet. Add one to start shaping the schema.");
+  });
+
+  it("lets authored schemas declare explicit references and shows them in setup and query context", async () => {
+    const runner = makeRunner(async () => ({ columns: ["id"], rows: [[1]] }));
+
+    render(
+      <SqlPracticeStudio
+        exercises={[curatedSeedExercise, customImportExercise]}
+        initialExerciseId="curated-seed"
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    await chooseNewSchemaSource();
+
+    await userEvent.click(screen.getByRole("button", { name: "Add table" }));
+    const firstTableName = (await screen.findByLabelText("Table 1 name")) as HTMLInputElement;
+    await userEvent.clear(firstTableName);
+    await userEvent.type(firstTableName, "orders");
+
+    const firstColumnName = (await screen.findByLabelText(
+      "orders column 1 name",
+    )) as HTMLInputElement;
+    await userEvent.clear(firstColumnName);
+    await userEvent.type(firstColumnName, "order_id");
+
+    await userEvent.click(screen.getByRole("button", { name: "Add column to orders" }));
+    const secondColumnName = (await screen.findByLabelText(
+      "orders column 2 name",
+    )) as HTMLInputElement;
+    await userEvent.clear(secondColumnName);
+    await userEvent.type(secondColumnName, "customer_id");
+
+    await userEvent.click(screen.getByRole("button", { name: "Add table" }));
+    const secondTableName = (await screen.findByLabelText("Table 2 name")) as HTMLInputElement;
+    await userEvent.clear(secondTableName);
+    await userEvent.type(secondTableName, "customers");
+
+    const customerIdInput = (await screen.findByLabelText(
+      "customers column 1 name",
+    )) as HTMLInputElement;
+    await userEvent.clear(customerIdInput);
+    await userEvent.type(customerIdInput, "customer_id");
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("orders column 2 reference"),
+      '["customers","customer_id"]',
+    );
+
+    await screen.findByText("orders.customer_id -> customers.customer_id");
+    await userEvent.click(screen.getByRole("button", { name: "Apply schema" }));
+    await userEvent.click(screen.getByRole("button", { name: "Query" }));
+
+    expect((await screen.findAllByText("joins on: customer_id")).length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText("orders.customer_id -> customers.customer_id")).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("preserves custom-import and new-schema drafts when returning Home", async () => {
+    const runner = makeRunner(async () => ({ columns: ["id"], rows: [[1]] }));
+
+    render(
+      <SqlPracticeStudio
+        exercises={[curatedSeedExercise, customImportExercise]}
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    await chooseSourceFromHome(/Import prompt\/schema/i);
+
+    const importBox = (await screen.findByLabelText("Import prompt")) as HTMLTextAreaElement;
+    await userEvent.clear(importBox);
+    await userEvent.type(importBox, "orders Table:");
+
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+    await chooseSourceFromHome(/Import prompt\/schema/i);
+    expect(((await screen.findByLabelText("Import prompt")) as HTMLTextAreaElement).value).toBe(
+      "orders Table:",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+    await chooseSourceFromHome(/Create schema/i);
+    await userEvent.click(screen.getByRole("button", { name: "Add table" }));
+
+    const tableNameInput = (await screen.findByLabelText("Table 1 name")) as HTMLInputElement;
+    await userEvent.clear(tableNameInput);
+    await userEvent.type(tableNameInput, "orders");
+
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+    await chooseSourceFromHome(/Create schema/i);
+    expect(((await screen.findByLabelText("Table 1 name")) as HTMLInputElement).value).toBe(
+      "orders",
+    );
+  });
+
+  it("confirms inline before resetting imported sources, while seeded reset stays lightweight", async () => {
+    const runner = makeRunner(async () => ({ columns: ["total"], rows: [[1]] }));
+
+    render(
+      <SqlPracticeStudio
+        exercises={[curatedSeedExercise, customImportExercise]}
+        initialExerciseId="curated-seed"
+        createRunner={vi.fn(async () => runner)}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
+    expect(screen.queryByText("Reset this work?")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+    await chooseSourceFromHome(/Import prompt\/schema/i);
+
+    const importBox = (await screen.findByLabelText("Import prompt")) as HTMLTextAreaElement;
+    await userEvent.clear(importBox);
+    await userEvent.type(importBox, "orders Table:");
+
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(screen.getByText("Reset this work?")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(importBox.value).toBe("orders Table:");
+
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yes, reset" }));
+    expect(((await screen.findByLabelText("Import prompt")) as HTMLTextAreaElement).value).toBe("");
   });
 
   it("shows seeded schema context in Query mode without leaving the editor", async () => {
@@ -767,8 +1044,6 @@ describe("SqlPlaygroundApp", () => {
       />,
     );
 
-    await screen.findByText("Ada");
-    await userEvent.click(screen.getByRole("button", { name: "Query" }));
     await screen.findByLabelText("SQL query");
 
     const schemaReference = screen.getByLabelText("Schema reference");
@@ -789,14 +1064,12 @@ describe("SqlPlaygroundApp", () => {
       />,
     );
 
-    await screen.findByText("Ada");
-    await userEvent.click(screen.getByRole("button", { name: "Query" }));
     await screen.findByLabelText("SQL query");
 
-    await userEvent.click(screen.getByRole("button", { name: "Hide schema reference" }));
+    await userEvent.click(screen.getByRole("button", { name: "Hide" }));
 
     expect(screen.queryByLabelText("Schema reference")).toBeNull();
     expect(screen.getByLabelText("SQL query")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show schema reference" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show" })).toBeTruthy();
   });
 });

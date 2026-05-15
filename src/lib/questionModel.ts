@@ -5,9 +5,15 @@ export type ColumnType =
   | "float"
   | "boolean";
 
+export interface ColumnReference {
+  table: string;
+  column: string;
+}
+
 export interface Column {
   name: string;
   type: ColumnType;
+  references?: ColumnReference;
 }
 
 export type CellValue = string | number | boolean | Date | null;
