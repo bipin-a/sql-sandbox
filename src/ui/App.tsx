@@ -1159,14 +1159,65 @@ interface ImportPanelProps {
   onImport: () => void;
 }
 
+const EXAMPLE_IMPORT_PROMPT = [
+  "users Table:",
+  "Column Name\tType",
+  "user_id\tinteger",
+  "email\tstring",
+  "signup_date\ttimestamp",
+  "",
+  "users Example Input:",
+  "user_id\temail\tsignup_date",
+  "1\talice@example.com\t01/15/2026 09:00:00",
+  "2\tbob@example.com\t02/03/2026 14:30:00",
+  "",
+  "orders Table:",
+  "Column Name\tType",
+  "order_id\tinteger",
+  "user_id\tinteger",
+  "amount\tfloat",
+  "created_at\ttimestamp",
+  "",
+  "orders Example Input:",
+  "order_id\tuser_id\tamount\tcreated_at",
+  "1001\t1\t29.99\t03/01/2026 10:15:00",
+  "1002\t2\t49.50\t03/02/2026 11:45:00",
+  "1003\t1\t19.95\t03/05/2026 16:20:00",
+].join("\n");
+
+const LLM_PROMPT_TEMPLATE = `Generate a schema for [describe your domain, e.g. "a blog with posts, comments, and users"] in this exact format. Use tab characters between column name and type. Supported types: integer, string, float, boolean, timestamp. Timestamps use MM/DD/YYYY HH:MM:SS. Use "-" for nulls. Return only the schema, no prose or markdown fences.
+
+<tablename> Table:
+Column Name\tType
+<col>\t<type>
+...
+
+<tablename> Example Input:
+<col>\t<col>\t...
+<val>\t<val>\t...
+...
+
+Include 2-5 tables with foreign-key relationships and 3-5 example rows per table.`;
+
 function ImportPanel({ value, onChange, onImport }: ImportPanelProps) {
   return (
     <section className="import-card">
       <div className="prompt-kicker">Custom Import</div>
       <h3>Paste your schema</h3>
       <p className="prompt-summary">
-        Paste a CREATE TABLE block or schema description, inspect the parsed tables, then query it.
+        Paste a DataLemur-style schema block (<code>tablename Table:</code> followed by tab-separated columns, optionally with an <code>Example Input:</code> block), inspect the parsed tables, then query it.
       </p>
+      <details className="import-help">
+        <summary>How to use this</summary>
+        <div className="import-help-body">
+          <p><strong>Format:</strong> Each table starts with a line ending in <code>Table:</code>, followed by columns as <code>name&lt;TAB&gt;type</code>. Optionally add an <code>Example Input:</code> block with a header row and data rows. Pipes (<code>|</code>) or two-or-more spaces also work as separators.</p>
+          <p><strong>Supported types:</strong> <code>integer</code>, <code>string</code>, <code>float</code>, <code>boolean</code>, <code>timestamp</code> (<code>MM/DD/YYYY HH:MM:SS</code>). Use <code>-</code> for nulls.</p>
+          <p><strong>Sample schema:</strong></p>
+          <pre className="import-help-pre">{EXAMPLE_IMPORT_PROMPT}</pre>
+          <p><strong>Prompt template for an LLM:</strong> Paste this into ChatGPT/Claude and replace the bracketed bit.</p>
+          <pre className="import-help-pre">{LLM_PROMPT_TEMPLATE}</pre>
+        </div>
+      </details>
       <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }} htmlFor="import-prompt">
         Import prompt
       </label>
@@ -1178,8 +1229,15 @@ function ImportPanel({ value, onChange, onImport }: ImportPanelProps) {
         rows={10}
         style={{ width: "100%", fontFamily: "ui-monospace, SFMono-Regular, monospace" }}
       />
-      <div style={{ marginTop: 8 }}>
+      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
         <button className="run-button" onClick={onImport}>Import</button>
+        <button
+          className="ghost-action"
+          type="button"
+          onClick={() => onChange(EXAMPLE_IMPORT_PROMPT)}
+        >
+          Load example
+        </button>
       </div>
     </section>
   );
